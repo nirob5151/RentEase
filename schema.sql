@@ -467,15 +467,33 @@ DECLARE
   v_listings BIGINT;
   v_students BIGINT;
   v_landlords BIGINT;
+  v_roommates BIGINT;
 BEGIN
   SELECT COUNT(*) INTO v_listings FROM public.properties WHERE status = 'approved' OR status = 'approved=true';
-  SELECT COUNT(*) INTO v_students FROM public.profiles WHERE role = 'student';
+  SELECT COUNT(*) INTO v_students FROM public.profiles WHERE role = 'student' AND is_active = true;
   SELECT COUNT(*) INTO v_landlords FROM public.landlord_profiles WHERE verification_status = 'verified' OR verification_status = 'approved';
+  SELECT COUNT(*) INTO v_roommates FROM public.roommate_profiles WHERE is_active = true;
 
   RETURN jsonb_build_object(
-    'verified_listings', COALESCE(NULLIF(v_listings, 0), 5000),
-    'active_students', COALESCE(NULLIF(v_students, 0), 12000),
-    'trusted_landlords', COALESCE(NULLIF(v_landlords, 0), 800)
+    'verified_listings', COALESCE(v_listings, 0),
+    'active_students', COALESCE(v_students, 0),
+    'trusted_landlords', COALESCE(v_landlords, 0),
+    'roommate_profiles', COALESCE(v_roommates, 0)
   );
 END;
 $$;
+
+-- ====================================================================
+-- REALTIME REPLICATION SUBSCRIPTIONS
+-- ====================================================================
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.properties;
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.reports;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  NULL;
+END $$;

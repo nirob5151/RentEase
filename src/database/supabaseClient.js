@@ -250,10 +250,17 @@ export const dbService = {
         console.warn('RPC get_rentease_stats error:', err);
       }
     }
+    // Calculate live from local tables (defaulting to 0 when empty)
+    const properties = getLocal('properties', []);
+    const users = getLocal('users', []);
+    const landlordProfiles = getLocal('landlord_profiles', []);
+    const roommateProfiles = getLocal('roommate_profiles', []);
+
     return {
-      verified_listings: 5000,
-      active_students: 12000,
-      trusted_landlords: 800
+      verified_listings: properties.filter(p => p.status === 'approved' || p.status === 'approved=true').length,
+      active_students: users.filter(u => (u.role === 'student' || String(u.role).toLowerCase().includes('student')) && u.is_active !== false).length,
+      trusted_landlords: landlordProfiles.filter(l => l.verification_status === 'verified' || l.verification_status === 'approved').length,
+      roommate_profiles: roommateProfiles.filter(r => r.is_active !== false).length
     };
   }
 };

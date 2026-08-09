@@ -5,16 +5,22 @@ import { dbService } from '../database/supabaseClient';
 function Hero({ onSearch, onExploreRoommates }) {
   const [searchValue, setSearchValue] = useState('');
   const [stats, setStats] = useState({
-    verified_listings: 5000,
-    active_students: 12000,
-    trusted_landlords: 800
+    verified_listings: 0,
+    active_students: 0,
+    trusted_landlords: 0,
+    roommate_profiles: 0
   });
 
   useEffect(() => {
     async function fetchRealtimeStats() {
       const data = await dbService.getRentEaseStats();
       if (data) {
-        setStats(data);
+        setStats({
+          verified_listings: Number(data.verified_listings || 0),
+          active_students: Number(data.active_students || 0),
+          trusted_landlords: Number(data.trusted_landlords || 0),
+          roommate_profiles: Number(data.roommate_profiles || 0)
+        });
       }
     }
     fetchRealtimeStats();
@@ -89,32 +95,41 @@ function Hero({ onSearch, onExploreRoommates }) {
       </section>
 
       {/* Realtime Database Statistics Metrics Row */}
-      <section className="landing-metrics" style={{ padding: '2.5rem 1rem', background: 'white' }}>
-        <div className="metrics-container" style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', maxWidth: '1000px', margin: '0 auto', textAlign: 'center' }}>
+      <section className="landing-metrics" style={{ padding: '2rem 1rem', background: 'white' }}>
+        <div className="metrics-container" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', maxWidth: '1100px', margin: '0 auto', textAlign: 'center' }}>
           <div className="metric-item">
-            <h3 style={{ fontSize: '2.75rem', fontWeight: '800', color: '#0252cc', margin: 0, letterSpacing: '-0.5px' }}>
-              {stats.verified_listings ? stats.verified_listings.toLocaleString() : '5,000'}+
+            <h3 style={{ fontSize: '2.5rem', fontWeight: '800', color: '#0252cc', margin: 0, letterSpacing: '-0.5px' }}>
+              {stats.verified_listings}
             </h3>
-            <p style={{ fontSize: '0.85rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '0.4rem' }}>
+            <p style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '0.3rem' }}>
               VERIFIED LISTINGS
             </p>
           </div>
 
           <div className="metric-item">
-            <h3 style={{ fontSize: '2.75rem', fontWeight: '800', color: '#0252cc', margin: 0, letterSpacing: '-0.5px' }}>
-              {stats.active_students ? stats.active_students.toLocaleString() : '12,000'}+
+            <h3 style={{ fontSize: '2.5rem', fontWeight: '800', color: '#0252cc', margin: 0, letterSpacing: '-0.5px' }}>
+              {stats.active_students}
             </h3>
-            <p style={{ fontSize: '0.85rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '0.4rem' }}>
+            <p style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '0.3rem' }}>
               ACTIVE STUDENTS
             </p>
           </div>
 
           <div className="metric-item">
-            <h3 style={{ fontSize: '2.75rem', fontWeight: '800', color: '#0252cc', margin: 0, letterSpacing: '-0.5px' }}>
-              {stats.trusted_landlords ? stats.trusted_landlords.toLocaleString() : '800'}+
+            <h3 style={{ fontSize: '2.5rem', fontWeight: '800', color: '#0252cc', margin: 0, letterSpacing: '-0.5px' }}>
+              {stats.trusted_landlords}
             </h3>
-            <p style={{ fontSize: '0.85rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '0.4rem' }}>
+            <p style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '0.3rem' }}>
               TRUSTED LANDLORDS
+            </p>
+          </div>
+
+          <div className="metric-item">
+            <h3 style={{ fontSize: '2.5rem', fontWeight: '800', color: '#0252cc', margin: 0, letterSpacing: '-0.5px' }}>
+              {stats.roommate_profiles}
+            </h3>
+            <p style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '0.3rem' }}>
+              ROOMMATE PROFILES
             </p>
           </div>
         </div>

@@ -33,32 +33,32 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
   const [mode, setMode] = useState(initialMode);
   const [role, setRole] = useState('student'); // 'student' | 'landlord'
   
-  // Basic Account Credentials
-  const [name, setName] = useState('Maruf Billah Anas');
-  const [email, setEmail] = useState('22235103467@cse.bubt.edu.bd');
-  const [phone, setPhone] = useState('+880 1712-345678');
-  const [password, setPassword] = useState('password123');
-  const [confirmPassword, setConfirmPassword] = useState('password123');
-  const [agreeTerms, setAgreeTerms] = useState(true);
+  // Basic Account Credentials (Blank by default for user input)
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [agreeTerms, setAgreeTerms] = useState(false);
   const [university, setUniversity] = useState('Bangladesh University of Business and Technology (BUBT)');
   const [profileImage, setProfileImage] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   
   // Student Profile Completion State
-  const [studentId, setStudentId] = useState('22235103467');
+  const [studentId, setStudentId] = useState('');
   const [department, setDepartment] = useState('BSc in Computer Science & Engineering (CSE)');
-  const [intakeNo, setIntakeNo] = useState('51/8');
-  const [emergencyPhone, setEmergencyPhone] = useState('+880 1711-998877');
+  const [intakeNo, setIntakeNo] = useState('');
+  const [emergencyPhone, setEmergencyPhone] = useState('');
   const [preferredArea, setPreferredArea] = useState('Mirpur 2 (Near BUBT Campus)');
   const [monthlyBudget, setMonthlyBudget] = useState('৳6,000 - ৳10,000 / month');
-  const [roommatePreference, setRoommatePreference] = useState('Quiet Study Environment & Non-Smoker');
+  const [roommatePreference, setRoommatePreference] = useState('');
 
   // Landlord NID & Property Verification State
-  const [nidNumber, setNidNumber] = useState('19922691887766554');
+  const [nidNumber, setNidNumber] = useState('');
   const [nidFrontImg, setNidFrontImg] = useState(null);
   const [nidBackImg, setNidBackImg] = useState(null);
-  const [propertyName, setPropertyName] = useState('Mirpur Green Villa');
-  const [propertyAddress, setPropertyAddress] = useState('House #12, Road #4, Block C, Mirpur 2, Dhaka');
+  const [propertyName, setPropertyName] = useState('');
+  const [propertyAddress, setPropertyAddress] = useState('');
   const [taxReceiptImg, setTaxReceiptImg] = useState(null);
 
   // Forgot Password Workflow State
@@ -768,13 +768,37 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                 </button>
               </form>
 
-              <div className="auth-footer" style={{ marginTop: '0.75rem' }}>
+              <div className="auth-footer" style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'center' }}>
                 <span>
                   Already have an account?{' '}
                   <span className="auth-link" onClick={() => { setError(null); setMode('signin'); }}>
                     Login
                   </span>
                 </span>
+
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setName('Maruf Billah Anas');
+                    setEmail('22235103467@cse.bubt.edu.bd');
+                    setPhone('+880 1712-345678');
+                    setPassword('password123');
+                    setConfirmPassword('password123');
+                    setStudentId('22235103467');
+                    setAgreeTerms(true);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    marginTop: '0.25rem'
+                  }}
+                >
+                  ⚡ Click here to auto-fill sample test data
+                </button>
               </div>
             </>
           )}

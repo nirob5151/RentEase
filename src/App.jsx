@@ -33,45 +33,15 @@ function App() {
   const [showDbViewer, setShowDbViewer] = useState(false);
   const [dbStatusMsg, setDbStatusMsg] = useState('');
 
-  const [notifications, setNotifications] = useState([
-    { id: 1, title: 'Booking Confirmed', message: 'Landlord Mehadi Hasan confirmed your booking for Mirpur House.', time: '2 hours ago', unread: true },
-    { id: 2, title: 'Roommate Match Request', message: 'Nirob Ahmed sent you a roommate match request.', time: '5 hours ago', unread: true },
-    { id: 3, title: 'Payment Receipt Ready', message: 'Your July 2026 rent receipt (TXN-88192) is ready for download.', time: 'Yesterday', unread: true }
-  ]);
+  const [notifications, setNotifications] = useState(() => {
+    const saved = localStorage.getItem('rentease_notifications');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   // Shared payments state for Student & Landlord portal synchronization
   const [sharedPayments, setSharedPayments] = useState(() => {
     const saved = localStorage.getItem('rentease_shared_payments');
-    return saved ? JSON.parse(saved) : [
-      {
-        id: 'pay_701',
-        receiptId: 'REC-88192',
-        receiptNo: 'REC-88192',
-        tenantName: 'Anas Ahmed',
-        propertyTitle: 'Mirpur House',
-        property: 'Mirpur House',
-        amount: 1200,
-        month: 'July 2026',
-        status: 'Paid',
-        date: '2026-07-01',
-        depositStatus: 'Refundable'
-      },
-      {
-        id: 'pay_702',
-        receiptId: 'REC-88193',
-        receiptNo: 'REC-88193',
-        tenantName: 'Anas Ahmed',
-        propertyTitle: 'Mirpur House',
-        property: 'Mirpur House',
-        amount: 1200,
-        month: 'August 2026',
-        status: 'Pending Approval (Sent to Landlord)',
-        date: '2026-07-23',
-        gateway: 'bKash',
-        accountNum: '01700000000',
-        depositStatus: 'Refundable'
-      }
-    ];
+    return saved ? JSON.parse(saved) : [];
   });
 
   // Initial load from Database Service

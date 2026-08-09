@@ -19,49 +19,31 @@ export default function StudentDashboard({
   // --- MOCK STATE SEEDS ---
 
   // 1. Saved Properties
-  const [savedCount] = useState(3);
+  const [savedCount] = useState(0);
 
   // 2. Active Bookings
-  const [bookings, setBookings] = useState([
-    {
-      id: 'bk_101',
-      propertyTitle: 'Mirpur House (Studio Suite)',
-      landlordName: 'Mehadi Hasan',
-      price: 1200,
-      moveInDate: '2026-08-01',
-      status: 'Confirmed',
-      deposit: 1200,
-      receiptId: 'REC-99120'
-    },
-    {
-      id: 'bk_102',
-      propertyTitle: 'Dhaka Premium Sublet',
-      landlordName: 'Mrs. Begum',
-      price: 850,
-      moveInDate: '2026-09-01',
-      status: 'Pending Landlord Approval',
-      deposit: 850,
-      receiptId: 'REC-99121'
-    }
-  ]);
+  const [bookings, setBookings] = useState(() => {
+    const saved = localStorage.getItem('rentease_student_bookings');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   // 3. Roommate Matches
-  const [matches] = useState([
-    { id: 1, name: 'Nirob Ahmed', score: '94%', dept: 'CSE BUBT', year: 'Senior Year', bio: 'Quiet study habits, early riser, non-smoker.', status: 'Request Pending' },
-    { id: 2, name: 'Sumon Paul', score: '88%', dept: 'BBA BUBT', year: 'Junior Year', bio: 'Loves gaming, clean room, keeps to himself.', status: 'Compatible' }
-  ]);
+  const [matches] = useState(() => {
+    const saved = localStorage.getItem('rentease_student_matches');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   // 4. Student Reviews Given
-  const [myReviews, setMyReviews] = useState([
-    { id: 1, target: 'Dhaka Rent Listing', rating: 5, comment: 'Great apartment close to BUBT campus. Fast fiber internet!', date: '2026-06-15' },
-    { id: 2, target: 'Nirob Ahmed (Roommate)', rating: 5, comment: 'Very respectful and clean roommate. Highly recommended!', date: '2026-05-10' }
-  ]);
+  const [myReviews, setMyReviews] = useState(() => {
+    const saved = localStorage.getItem('rentease_student_reviews');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   // 5. Payments History
-  const [localPayments, setLocalPayments] = useState([
-    { id: 'pay_701', month: 'July 2026', property: 'Mirpur House', amount: 1200, status: 'Paid', date: '2026-07-01', receiptNo: 'TXN-88192' },
-    { id: 'pay_700', month: 'June 2026', property: 'Mirpur House', amount: 1200, status: 'Paid', date: '2026-06-01', receiptNo: 'TXN-88100' }
-  ]);
+  const [localPayments, setLocalPayments] = useState(() => {
+    const saved = localStorage.getItem('rentease_student_payments');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   // 6. Profile Editable Form States
   const [fullName, setFullName] = useState(currentUser?.name || 'Anas Ahmed');

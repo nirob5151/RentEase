@@ -977,6 +977,45 @@ export const dbService = {
     return { success: true, message: `Database reset complete. Admin account (${adminEmail}) preserved.` };
   },
 
+  // --- 15. HERO REALTIME PLATFORM STATS QUERY ---
+  async getRentEaseStats() {
+    let listingsCount = 0;
+    let studentsCount = 0;
+    let landlordsCount = 0;
+    let roommatesCount = 0;
+
+    if (isConfigured) {
+      try {
+        const { count: lCount } = await supabase.from('listings').select('*', { count: 'exact', head: true });
+        if (lCount !== null && lCount !== undefined) listingsCount = lCount;
+
+        const { count: sCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'student');
+        if (sCount !== null && sCount !== undefined) studentsCount = sCount;
+
+        const { count: ldCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'landlord');
+        if (ldCount !== null && ldCount !== undefined) landlordsCount = ldCount;
+
+        const { count: rCount } = await supabase.from('roommate_profiles').select('*', { count: 'exact', head: true });
+        if (rCount !== null && rCount !== undefined) roommatesCount = rCount;
+      } catch (err) {
+        console.warn('Supabase getRentEaseStats error:', err);
+      }
+    } else {
+      const listings = getLocal('listings') || [];
+      const users = getLocal('users') || [];
+      listingsCount = listings.length;
+      studentsCount = users.filter(u => (u.role || '').toLowerCase().includes('student')).length;
+      landlordsCount = users.filter(u => (u.role || '').toLowerCase().includes('landlord')).length;
+    }
+
+    return {
+      verified_listings: listingsCount,
+      active_students: studentsCount,
+      trusted_landlords: landlordsCount,
+      roommate_profiles: roommatesCount
+    };
+  },
+
   // --- 11. TEMPORARY EMAIL VERIFICATIONS ---
   async saveTempVerification(email, code, signupData) {
     const key = (email || '').toLowerCase().trim();

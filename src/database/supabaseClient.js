@@ -1002,8 +1002,10 @@ export const dbService = {
         
         if (rData) {
           const validRoommates = rData.filter(r => {
+            if (!r) return false;
             const name = (r.name || r.student_name || '').toLowerCase();
-            return name && !name.includes('tanvir') && !name.includes('anas ahmed');
+            if (name.includes('tanvir') || name.includes('anas ahmed')) return false;
+            return true;
           });
           roommatesCount = validRoommates.length;
         }
@@ -1017,8 +1019,10 @@ export const dbService = {
       studentsCount = users.filter(u => (u.role || '').toLowerCase().includes('student')).length;
       landlordsCount = users.filter(u => (u.role || '').toLowerCase().includes('landlord')).length;
       const roommates = (getLocal('roommates') || []).filter(r => {
+        if (!r) return false;
         const name = (r?.name || r?.student_name || '').toLowerCase();
-        return name && !name.includes('tanvir') && !name.includes('anas ahmed');
+        if (name.includes('tanvir') || name.includes('anas ahmed')) return false;
+        return true;
       });
       roommatesCount = roommates.length;
     }
@@ -1141,6 +1145,41 @@ export const dbService = {
       }
     }
     return updated;
+  },
+
+  async deleteRoommate(currentUser) {
+    if (!currentUser) return false;
+    const cId = (currentUser.id || '').toString();
+    const cEmail = (currentUser.email || '').toLowerCase().trim();
+
+    // 1. Remove from local storage
+    const current = getLocal('roommates') || [];
+    const updated = current.filter(r => {
+      if (!r) return false;
+      const rId = (r.student_id || r.id || '').toString();
+      const rEmail = (r.email || r.student_email || '').toLowerCase().trim();
+      if (cId && rId && rId === cId) return false;
+      if (cEmail && rEmail && rEmail === cEmail) return false;
+      if (r.isMyProfile) return false;
+      return true;
+    });
+    setLocal('roommates', updated);
+
+    // 2. Delete row from Supabase PostgreSQL cloud table (matches student_id, id, and student_email)
+    if (isConfigured) {
+      try {
+        if (cId) {
+          await supabase.from('roommate_profiles').delete().eq('student_id', cId);
+          await supabase.from('roommate_profiles').delete().eq('id', cId);
+        }
+        if (cEmail) {
+          await supabase.from('roommate_profiles').delete().eq('student_email', cEmail);
+        }
+      } catch (err) {
+        console.warn('Supabase deleteRoommate error:', err);
+      }
+    }
+    return true;
   },
 
   // --- 11. TEMPORARY EMAIL VERIFICATIONS ---

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Sparkles, Brush, Sofa, Sun, Moon, BookOpen, Users, Ban, Flame, 
   MessageSquare, ArrowRight, Check, Search, Filter, ChevronLeft, 
-  ChevronRight, X, Heart, ShieldCheck, Clock, Award, Star, Plus, Edit3, UserCheck
+  ChevronRight, X, Heart, ShieldCheck, Clock, Award, Star, Plus, Edit3, UserCheck, Trash2
 } from 'lucide-react';
 import { dbService } from '../database/supabaseClient';
 
@@ -70,7 +70,7 @@ function RoommateMatching({ currentUser, onStartChat }) {
   useEffect(() => {
     async function loadRoommatesAndMyProfile() {
       try {
-        // 1. Fetch current logged in user's saved roommate profile
+        // 1. Fetch current logged in user's saved roommate profile from database (SINGLE SOURCE OF TRUTH)
         if (currentUser) {
           const myProfile = await dbService.getMyRoommateProfile(currentUser);
           if (myProfile) {
@@ -80,7 +80,11 @@ function RoommateMatching({ currentUser, onStartChat }) {
             if (myProfile.sleepSchedule) setMySleep(myProfile.sleepSchedule);
             if (myProfile.cleanliness) setMyCleanliness(myProfile.cleanliness);
             if (myProfile.studyHabits) setMyStudy(myProfile.studyHabits);
+          } else {
+            setMyProfileCreated(false);
           }
+        } else {
+          setMyProfileCreated(false);
         }
 
         // 2. Fetch all candidate roommate profiles
@@ -145,6 +149,25 @@ function RoommateMatching({ currentUser, onStartChat }) {
     setRoommates(prev => [myProfileCard, ...prev.filter(r => r.id !== myProfileCard.id)]);
     await dbService.saveRoommate(myProfileCard);
     alert('✨ Your Roommate Profile is now PUBLIC & DISCOVERABLE! Other students can connect and message you.');
+  };
+
+  const handleDeleteProfile = async () => {
+    const confirmDelete = window.confirm(
+      "Are you sure you want to remove your Roommate Profile?\n\nOther students will no longer be able to find or match with you on RentEase."
+    );
+    if (!confirmDelete) return;
+
+    await dbService.deleteRoommate(currentUser);
+    setMyProfileCreated(false);
+    setShowCreateModal(false);
+
+    // Refresh candidate roommates list
+    const data = await dbService.getRoommates(currentUser);
+    if (Array.isArray(data)) {
+      setRoommates(data);
+    }
+
+    alert('🗑️ Your Roommate Profile has been successfully removed.');
   };
 
   const filteredRoommates = (roommates || []).filter(person => {
@@ -536,10 +559,20 @@ function RoommateMatching({ currentUser, onStartChat }) {
                 <span><strong>Make my profile PUBLIC & DISCOVERABLE</strong> to other university students on RentEase</span>
               </label>
 
-              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
                 <button type="button" onClick={() => setShowCreateModal(false)} style={{ flex: 1, padding: '0.75rem', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-sm)', background: 'transparent', cursor: 'pointer', fontWeight: 600 }}>
                   Cancel
                 </button>
+                {myProfileCreated && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteProfile}
+                    style={{ flex: 1, padding: '0.75rem', border: '1px solid #fecaca', borderRadius: 'var(--radius-sm)', background: '#fef2f2', color: '#dc2626', cursor: 'pointer', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem' }}
+                  >
+                    <Trash2 size={16} />
+                    <span>Remove Profile</span>
+                  </button>
+                )}
                 <button type="submit" className="btn-filter-apply" style={{ flex: 1.5, padding: '0.75rem' }}>
                   Save & Publish Profile
                 </button>

@@ -422,11 +422,16 @@ function App() {
     }
   };
 
-  const handleSaveSettings = (updatedDetails) => {
-    setCurrentUser(prev => ({
-      ...prev,
+  const handleSaveSettings = async (updatedDetails) => {
+    const mergedUser = {
+      ...currentUser,
       ...updatedDetails
-    }));
+    };
+    setCurrentUser(mergedUser);
+
+    if (mergedUser?.email) {
+      await dbService.saveUser(mergedUser);
+    }
   };
 
   const userRoleLower = (currentUser?.role || '').toLowerCase();

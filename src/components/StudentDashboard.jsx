@@ -102,8 +102,8 @@ export default function StudentDashboard({
           receiptId: p.receipt_id || p.receiptId || 'REC-' + p.id,
           receiptNo: p.receipt_id || p.receiptId || 'REC-' + p.id,
           tenantName: p.tenant_name || p.tenantName || currentUser?.name || 'Student Tenant',
-          propertyTitle: p.property_title || p.propertyTitle || 'Mirpur House',
-          property: p.property_title || p.propertyTitle || 'Mirpur House',
+          propertyTitle: p.property_title || p.propertyTitle || 'Student Housing',
+          property: p.property_title || p.propertyTitle || 'Student Housing',
           amount: p.amount || 6000,
           month: p.month || 'August 2026',
           status: p.status === 'Paid' ? 'Paid' : (p.status || 'Pending'),
@@ -525,14 +525,21 @@ export default function StudentDashboard({
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', border: '1px solid var(--border-light)', padding: '0.75rem', borderRadius: '8px', background: '#f8fafc' }}>
-                  <img src="https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=150&q=80" alt="housing" style={{ width: '70px', height: '70px', borderRadius: '6px', objectFit: 'cover' }} />
-                  <div>
-                    <h4 style={{ fontWeight: '800', fontSize: '0.95rem' }}>Mirpur House</h4>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>0.4 miles from BUBT campus</p>
-                    <span style={{ fontWeight: '800', color: 'var(--primary)', fontSize: '0.85rem' }}>1,200 BDT/mo</span>
+                {(listings || []).slice(0, 3).map(item => (
+                  <div key={item.id} style={{ display: 'flex', gap: '1rem', alignItems: 'center', border: '1px solid var(--border-light)', padding: '0.75rem', borderRadius: '8px', background: '#f8fafc', cursor: 'pointer' }} onClick={() => onNavigate('listings')}>
+                    <img src={item.image || 'https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=150&q=80'} alt={item.title} style={{ width: '70px', height: '70px', borderRadius: '6px', objectFit: 'cover' }} />
+                    <div>
+                      <h4 style={{ fontWeight: '800', fontSize: '0.95rem' }}>{item.title}</h4>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{item.location}</p>
+                      <span style={{ fontWeight: '800', color: 'var(--primary)', fontSize: '0.85rem' }}>{item.price} BDT/mo</span>
+                    </div>
                   </div>
-                </div>
+                ))}
+                {(!listings || listings.length === 0) && (
+                  <div style={{ padding: '1.5rem', textAlign: 'center', background: '#f8fafc', borderRadius: '8px', border: '1px solid var(--border-light)' }}>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>No recommended properties available yet.</p>
+                  </div>
+                )}
               </div>
             </div>
 

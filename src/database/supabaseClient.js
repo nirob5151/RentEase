@@ -1043,8 +1043,29 @@ export const dbService = {
     if (isConfigured) {
       try {
         const { data, error } = await supabase.from('roommate_profiles').select('*');
+        const { data: userProfiles } = await supabase.from('profiles').select('*');
+
         if (!error && Array.isArray(data)) {
-          results = data;
+          results = data.map(r => {
+            const rName = (r.name || r.student_name || '').toLowerCase().trim();
+            const matchedUser = (userProfiles || []).find(u => 
+              (u.full_name && rName && u.full_name.toLowerCase().trim() === rName) ||
+              (u.email && r.student_email && u.email.toLowerCase().trim() === r.student_email.toLowerCase().trim()) ||
+              (u.id && r.student_id && String(u.id) === String(r.student_id))
+            );
+
+            const liveAvatar = matchedUser?.avatar_url || matchedUser?.profile_picture || r.avatar || r.image;
+            const liveEmail = matchedUser?.email || r.student_email || r.email || '';
+            const liveId = matchedUser?.id || r.student_id || r.id || r.user_id;
+
+            return {
+              ...r,
+              student_id: liveId,
+              email: liveEmail,
+              image: liveAvatar,
+              avatar: liveAvatar
+            };
+          });
           fetched = true;
         }
       } catch (e) {
@@ -1054,7 +1075,23 @@ export const dbService = {
     
     if (!fetched) {
       const rawLocal = getLocal('roommates') || [];
-      results = rawLocal.filter(r => r && r.name !== 'Tanvir Hossain' && r.name !== 'Anas Ahmed' && r.id !== 'rm_1' && r.id !== 'rm_2');
+      const userProfiles = getLocal('users') || [];
+      results = rawLocal
+        .filter(r => r && r.name !== 'Tanvir Hossain' && r.name !== 'Anas Ahmed' && r.id !== 'rm_1' && r.id !== 'rm_2')
+        .map(r => {
+          const rName = (r.name || '').toLowerCase().trim();
+          const matchedUser = userProfiles.find(u => (u.name || '').toLowerCase().trim() === rName);
+          const liveAvatar = matchedUser?.avatar || matchedUser?.profile_picture || r.image;
+          const liveEmail = matchedUser?.email || r.email;
+          const liveId = matchedUser?.id || r.student_id || r.id;
+          return {
+            ...r,
+            student_id: liveId,
+            email: liveEmail,
+            image: liveAvatar,
+            avatar: liveAvatar
+          };
+        });
     }
 
     const currentEmail = (currentUser?.email || '').toLowerCase().trim();
@@ -1064,12 +1101,14 @@ export const dbService = {
     return results.filter(r => {
       if (!r) return false;
       const rName = (r.name || r.student_name || '').toLowerCase().trim();
+      const cName = (currentUser?.name || '').toLowerCase().trim();
       if (rName.includes('tanvir') || rName.includes('anas ahmed')) return false;
 
       const rEmail = (r.email || r.student_email || '').toLowerCase().trim();
       const rId = (r.student_id || r.id || r.user_id || '').toString();
       if (currentEmail && rEmail && rEmail === currentEmail) return false;
       if (currentId && rId && rId === currentId) return false;
+      if (cName && rName && rName === cName) return false;
       return true;
     });
   },
@@ -1078,6 +1117,7 @@ export const dbService = {
     if (!currentUser) return null;
     const cId = (currentUser.id || '').toString();
     const cEmail = (currentUser.email || '').toLowerCase().trim();
+    const cName = (currentUser.name || '').toLowerCase().trim();
 
     if (isConfigured) {
       try {
@@ -1086,15 +1126,18 @@ export const dbService = {
           const found = data.find(r => 
             (r.student_id && String(r.student_id) === cId) ||
             (r.student_email && r.student_email.toLowerCase().trim() === cEmail) ||
-            (r.email && r.email.toLowerCase().trim() === cEmail)
+            (r.email && r.email.toLowerCase().trim() === cEmail) ||
+            (cName && r.name && r.name.toLowerCase().trim() === cName) ||
+            (cName && r.student_name && r.student_name.toLowerCase().trim() === cName)
           );
           if (found) {
             return {
               id: found.id,
-              student_id: found.student_id,
+              student_id: found.student_id || cId,
               email: found.student_email || found.email || cEmail,
-              name: found.student_name || found.name || currentUser.name || 'Student Roommate',
-              budget: found.budget || '6,500 BDT/mo',
+              name: currentUser.name || found.student_name || found.name || 'Student Roommate',
+              image: currentUser?.avatar || currentUser?.profile_picture || found.image || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=300&q=80',
+              budget: typeof found.budget === 'number' ? `${found.budget.toLocaleString()} BDT/mo` : (found.budget || '6,500 BDT/mo'),
               sleepSchedule: found.sleep_schedule || found.sleepSchedule || 'Night Owl',
               cleanliness: found.cleanliness_level || found.cleanliness || 'Clean',
               studyHabits: found.study_habits || found.studyHabits || 'Quiet Study',
@@ -1114,32 +1157,54 @@ export const dbService = {
     const myLocal = localRoommates.find(r => 
       (r.student_id && String(r.student_id) === cId) ||
       (r.email && (r.email || '').toLowerCase().trim() === cEmail) ||
+      (cName && (r.name || '').toLowerCase().trim() === cName) ||
       r.isMyProfile
     );
-    return myLocal || null;
+    if (myLocal) {
+      return {
+        ...myLocal,
+        image: currentUser?.avatar || currentUser?.profile_picture || myLocal.image
+      };
+    }
+    return null;
   },
 
   async saveRoommate(roommateData) {
     const current = getLocal('roommates') || [];
-    const updated = [roommateData, ...current.filter(r => r.id !== roommateData.id && r.student_id !== roommateData.student_id)];
+    const updated = [roommateData, ...current.filter(r => r.id !== roommateData.id && r.student_id !== roommateData.student_id && r.name !== roommateData.name)];
     setLocal('roommates', updated);
 
     if (isConfigured) {
       try {
-        await supabase.from('roommate_profiles').upsert([{
-          id: String(roommateData.id || 'rm_' + Date.now()),
-          student_id: String(roommateData.student_id || roommateData.id || ''),
-          student_name: roommateData.name || 'Student Roommate',
-          student_email: roommateData.email || '',
+        const studentIdVal = roommateData.student_id || roommateData.user_id || roommateData.id;
+        const payload = {
+          student_id: studentIdVal ? String(studentIdVal) : null,
+          name: roommateData.name || 'Student Roommate',
           bio: roommateData.bio || '',
-          budget: roommateData.budget || '6,500 BDT/mo',
-          sleep_schedule: roommateData.sleepSchedule || 'Night Owl',
-          cleanliness_level: roommateData.cleanliness || 'Clean',
-          study_habits: roommateData.studyHabits || 'Quiet Study',
-          pets: roommateData.pets || 'No Pets',
-          gender: roommateData.gender || 'Male',
-          is_active: true
-        }]);
+          budget: typeof roommateData.budget === 'number' ? roommateData.budget : parseInt(String(roommateData.budget).replace(/[^0-9]/g, '')) || 6500,
+          cleanliness: roommateData.cleanliness || 'Clean',
+          gender: roommateData.gender || 'Male'
+        };
+        
+        // 1. Primary lookup by student_id
+        let existing = null;
+        if (studentIdVal) {
+          const { data: byId } = await supabase.from('roommate_profiles').select('id').eq('student_id', String(studentIdVal));
+          if (byId && byId.length > 0) existing = byId;
+        }
+
+        // 2. Secondary fallback lookup by name with warning log
+        if (!existing && roommateData.name) {
+          console.warn('[DataIntegrityWarning] Primary student_id lookup missed. Using name fallback for:', roommateData.name);
+          const { data: byName } = await supabase.from('roommate_profiles').select('id').eq('name', roommateData.name);
+          if (byName && byName.length > 0) existing = byName;
+        }
+
+        if (existing && existing.length > 0) {
+          await supabase.from('roommate_profiles').update(payload).eq('id', existing[0].id);
+        } else {
+          await supabase.from('roommate_profiles').insert([payload]);
+        }
       } catch (err) {
         console.warn('Supabase saveRoommate error:', err);
       }
@@ -1151,6 +1216,7 @@ export const dbService = {
     if (!currentUser) return false;
     const cId = (currentUser.id || '').toString();
     const cEmail = (currentUser.email || '').toLowerCase().trim();
+    const cName = (currentUser.name || '').toLowerCase().trim();
 
     // 1. Remove from local storage
     const current = getLocal('roommates') || [];
@@ -1158,22 +1224,24 @@ export const dbService = {
       if (!r) return false;
       const rId = (r.student_id || r.id || '').toString();
       const rEmail = (r.email || r.student_email || '').toLowerCase().trim();
+      const rName = (r.name || r.student_name || '').toLowerCase().trim();
+
       if (cId && rId && rId === cId) return false;
       if (cEmail && rEmail && rEmail === cEmail) return false;
+      if (cName && rName && rName === cName) return false;
       if (r.isMyProfile) return false;
       return true;
     });
     setLocal('roommates', updated);
 
-    // 2. Delete row from Supabase PostgreSQL cloud table (matches student_id, id, and student_email)
+    // 2. Delete row from Supabase PostgreSQL cloud table (matches name, student_id, and email)
     if (isConfigured) {
       try {
+        if (currentUser.name) {
+          await supabase.from('roommate_profiles').delete().eq('name', currentUser.name);
+        }
         if (cId) {
           await supabase.from('roommate_profiles').delete().eq('student_id', cId);
-          await supabase.from('roommate_profiles').delete().eq('id', cId);
-        }
-        if (cEmail) {
-          await supabase.from('roommate_profiles').delete().eq('student_email', cEmail);
         }
       } catch (err) {
         console.warn('Supabase deleteRoommate error:', err);

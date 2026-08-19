@@ -289,6 +289,24 @@ function App() {
     const currentEmailVal = (currentUser?.email || '').toLowerCase().trim();
     const currentUserIdVal = (currentUser?.id || '').toString();
 
+    // Look up target recipient user profile dynamically from local storage or cloud
+    const storedUsers = JSON.parse(localStorage.getItem('rentease_users') || '[]');
+    const targetUserMatch = storedUsers.find(u => 
+      (u.name && u.name.toLowerCase().trim() === cleanName.toLowerCase().trim()) ||
+      (u.email && targetEmail && u.email.toLowerCase().trim() === targetEmail.toLowerCase().trim())
+    );
+
+    const resolvedTargetEmail = (targetEmail && targetEmail !== currentEmailVal) 
+      ? targetEmail 
+      : (targetUserMatch?.email || targetEmail || '');
+
+    const resolvedTargetId = (targetId && targetId !== currentUserIdVal) 
+      ? targetId 
+      : (targetUserMatch?.id || targetId || '');
+
+    const resolvedTargetAvatar = targetUserMatch?.avatar || targetUserMatch?.profile_picture || avatarUrl || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80';
+
+    const convType = contactRole === 'Student / Roommate' ? 'roommate_chat' : 'landlord_inquiry';
     let updatedChats = [...chats];
 
     if (existingIndex >= 0) {
@@ -296,14 +314,20 @@ function App() {
       const newMessages = initialMsgObj ? [...(target.messages || []), initialMsgObj] : (target.messages || []);
       updatedChats[existingIndex] = {
         ...target,
-        landlord_email: isLandlordUser ? currentEmailVal : (target.landlord_email || targetEmail || currentEmailVal),
-        landlord_id: isLandlordUser ? currentUserIdVal : (target.landlord_id || targetId || currentUserIdVal),
-        student_email: isStudentUser ? currentEmailVal : (target.student_email || targetEmail || currentEmailVal),
-        student_id: isStudentUser ? currentUserIdVal : (target.student_id || targetId || currentUserIdVal),
+        type: convType,
+        conversation_type: convType,
+        sender_email: currentEmailVal,
+        sender_id: currentUserIdVal,
+        recipient_email: resolvedTargetEmail || target.recipient_email || target.landlord_email || '',
+        recipient_id: resolvedTargetId || target.recipient_id || target.landlord_id || '',
+        landlord_email: isStudentUser ? (resolvedTargetEmail || target.landlord_email || currentEmailVal) : (isLandlordUser ? currentEmailVal : (resolvedTargetEmail || currentEmailVal)),
+        landlord_id: isStudentUser ? (resolvedTargetId || target.landlord_id || currentUserIdVal) : (isLandlordUser ? currentUserIdVal : (resolvedTargetId || currentUserIdVal)),
+        student_email: isStudentUser ? currentEmailVal : (resolvedTargetEmail || currentEmailVal),
+        student_id: isStudentUser ? currentUserIdVal : (resolvedTargetId || currentUserIdVal),
         property_id: propId || target.property_id || target.propertyId || '',
-        property_title: propTitle || target.property_title || target.propertyTitle || 'Rental Inquiry',
-        role: propTitle || contactRole || target.role || 'Rental Inquiry',
-        avatar: avatarUrl || target.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+        property_title: propTitle || target.property_title || target.propertyTitle || (convType === 'roommate_chat' ? 'Roommate Connection' : 'Rental Inquiry'),
+        role: contactRole || target.role || (convType === 'roommate_chat' ? 'Student / Roommate' : 'Rental Inquiry'),
+        avatar: resolvedTargetAvatar || target.avatar,
         snippet: initialMsgText || target.snippet || 'Conversation started',
         time: formattedTime,
         messages: newMessages
@@ -313,17 +337,23 @@ function App() {
       const newChat = {
         id: chatId,
         name: cleanName,
-        landlord_email: isLandlordUser ? currentEmailVal : (targetEmail || currentEmailVal),
-        landlord_id: isLandlordUser ? currentUserIdVal : (targetId || currentUserIdVal),
-        student_email: isStudentUser ? currentEmailVal : (targetEmail || currentEmailVal),
-        student_id: isStudentUser ? currentUserIdVal : (targetId || currentUserIdVal),
+        type: convType,
+        conversation_type: convType,
+        sender_email: currentEmailVal,
+        sender_id: currentUserIdVal,
+        recipient_email: resolvedTargetEmail,
+        recipient_id: resolvedTargetId,
+        landlord_email: isStudentUser ? (resolvedTargetEmail || currentEmailVal) : (isLandlordUser ? currentEmailVal : (resolvedTargetEmail || currentEmailVal)),
+        landlord_id: isStudentUser ? (resolvedTargetId || currentUserIdVal) : (isLandlordUser ? currentUserIdVal : (resolvedTargetId || currentUserIdVal)),
+        student_email: isStudentUser ? currentEmailVal : (resolvedTargetEmail || currentEmailVal),
+        student_id: isStudentUser ? currentUserIdVal : (resolvedTargetId || currentUserIdVal),
         property_id: propId,
-        property_title: propTitle || contactRole || 'Rental Inquiry',
-        role: propTitle || contactRole || 'Rental Inquiry',
+        property_title: propTitle || (convType === 'roommate_chat' ? 'Roommate Connection' : 'Rental Inquiry'),
+        role: contactRole || (convType === 'roommate_chat' ? 'Student / Roommate' : 'Rental Inquiry'),
         time: formattedTime,
         unread: 0,
         snippet: initialMsgText || 'Conversation started',
-        avatar: avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+        avatar: resolvedTargetAvatar,
         messages: initialMsgObj ? [initialMsgObj] : []
       };
       updatedChats = [newChat, ...chats];
@@ -452,15 +482,19 @@ function App() {
     const sEmail = (c.student_email || c.studentEmail || '').toLowerCase().trim();
     const sId = (c.student_id || c.studentId || '').toString();
 
+    const rEmail = (c.recipient_email || c.recipientEmail || '').toLowerCase().trim();
+    const rId = (c.recipient_id || c.recipientId || '').toString();
+
     if (isLandlordUser) {
-      if (currentEmail && lEmail && lEmail === currentEmail) return true;
-      if (currentUserId && lId && lId === currentUserId) return true;
+      if (c.conversation_type === 'roommate_chat' || c.type === 'roommate_chat') return false;
+      if (currentEmail && (lEmail === currentEmail || rEmail === currentEmail)) return true;
+      if (currentUserId && (lId === currentUserId || rId === currentUserId)) return true;
       return false;
     }
 
     if (isStudentUser) {
-      if (currentEmail && sEmail && sEmail === currentEmail) return true;
-      if (currentUserId && sId && sId === currentUserId) return true;
+      if (currentEmail && (sEmail === currentEmail || lEmail === currentEmail || rEmail === currentEmail)) return true;
+      if (currentUserId && (sId === currentUserId || lId === currentUserId || rId === currentUserId)) return true;
       return false;
     }
 

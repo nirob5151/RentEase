@@ -145,7 +145,7 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
               className={`chat-inbox-item ${activeChat?.id === c.id ? 'active' : ''}`}
               onClick={() => setActiveChatId(c.id)}
             >
-              <img src={c.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80'} alt={c.name} className="chat-inbox-avatar" />
+              <img src={getLiveAvatar(c)} alt={c.name} className="chat-inbox-avatar" />
               <div className="chat-inbox-details">
                 <div className="chat-inbox-title-row">
                   <span className="chat-inbox-name" style={{ fontWeight: '700' }}>
@@ -171,14 +171,20 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
           {/* Header */}
           <div className="chat-window-header">
             <div className="chat-window-header-user">
-              <img src={activeChat.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80'} alt={activeChat.name} className="chat-inbox-avatar" style={{ width: '2.25rem', height: '2.25rem' }} />
+              <img src={getLiveAvatar(activeChat)} alt={activeChat.name} className="chat-inbox-avatar" style={{ width: '2.25rem', height: '2.25rem' }} />
               <div className="chat-window-header-details">
                 <h3>{activeChat.name}</h3>
                 <p style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  <span>{currentUser?.role?.includes('Landlord') ? 'Tenant / Student' : 'Landlord / Property Owner'}</span>
+                  <span>
+                    {(activeChat.type === 'roommate_chat' || activeChat.conversation_type === 'roommate_chat' || activeChat.role === 'Student / Roommate')
+                      ? 'Student / Roommate Peer'
+                      : (currentUser?.role?.includes('Landlord') ? 'Tenant / Student' : 'Landlord / Property Owner')}
+                  </span>
                   <span>•</span>
                   <span style={{ color: 'var(--primary)', fontWeight: '700' }}>
-                    Regarding: {activeChat.property_title || activeChat.propertyTitle || activeChat.role || 'Property Listing'}
+                    Regarding: {(activeChat.type === 'roommate_chat' || activeChat.conversation_type === 'roommate_chat' || activeChat.role === 'Student / Roommate')
+                      ? 'Roommate Connection'
+                      : (activeChat.property_title || activeChat.propertyTitle || activeChat.role || 'Property Listing')}
                   </span>
                 </p>
               </div>
@@ -209,22 +215,20 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
 
               // Determine if this message was sent by the currently logged-in user
               let isMine = false;
-              if (currentUserId && msgSenderId && currentUserId === msgSenderId) {
+              if (currentUserId && msgSenderId) {
+                isMine = (currentUserId === msgSenderId);
+              } else if (currentUserEmail && msgSenderEmail) {
+                isMine = (currentUserEmail === msgSenderEmail);
+              } else if (msgSenderRole === 'landlord' && isUserLandlord && !isUserStudent) {
                 isMine = true;
-              } else if (currentUserEmail && msgSenderEmail && currentUserEmail === msgSenderEmail) {
-                isMine = true;
-              } else if (msgSenderRole === 'landlord' && isUserLandlord) {
-                isMine = true;
-              } else if (msgSenderRole === 'student' && isUserStudent) {
-                isMine = true;
-              } else if (msg.sender === 'sender') {
+              } else if (msg.sender === 'sender' && !msgSenderId && !msgSenderEmail) {
                 isMine = true;
               }
 
               return (
                 <div key={msg.id || i} className={`chat-bubble-row ${isMine ? 'sender' : 'receiver'}`}>
                   {!isMine && (
-                    <img src={activeChat.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80'} alt="avatar" className="chat-bubble-avatar" />
+                    <img src={getLiveAvatar(activeChat)} alt="avatar" className="chat-bubble-avatar" />
                   )}
                   <div className="chat-bubble-group">
                     {msg.isAttachment ? (

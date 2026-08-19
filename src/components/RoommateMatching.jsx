@@ -441,7 +441,7 @@ function RoommateMatching({ currentUser, onStartChat }) {
                     <button 
                       className="btn-card-secondary"
                       style={{ padding: '0.5rem', color: 'var(--primary)', borderColor: 'var(--primary-glow)' }}
-                      onClick={() => onStartChat(person.name, 'Hi ' + person.name + '! I saw your roommate profile on RentEase and would love to discuss shared flat availability.', 'Student / Roommate', person.image)}
+                      onClick={() => onStartChat(person.name, 'Hi ' + person.name + '! I saw your roommate profile on RentEase and would love to discuss shared flat availability.', 'Student / Roommate', person.image, person.email || person.student_email || '', person.id || person.student_id || person.user_id || '')}
                       title={'Message ' + person.name}
                     >
                       <MessageSquare size={16} />
@@ -527,8 +527,10 @@ function RoommateMatching({ currentUser, onStartChat }) {
                   onClick={() => {
                     const name = selectedRoommate.name;
                     const avatar = selectedRoommate.image;
+                    const rEmail = selectedRoommate.email || selectedRoommate.student_email || '';
+                    const rId = selectedRoommate.id || selectedRoommate.student_id || selectedRoommate.user_id || '';
                     setSelectedRoommate(null);
-                    onStartChat(name, `Hi ${name}! Let's connect on RentEase.`, 'Student / Roommate', avatar);
+                    onStartChat(name, `Hi ${name}! Let's connect on RentEase.`, 'Student / Roommate', avatar, rEmail, rId);
                   }}
                 >
                   <MessageSquare size={16} /> 💬 Start Chat

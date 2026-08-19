@@ -442,14 +442,15 @@ function Dashboard({ listings, onAddListing, onEditListing, onDeleteListing, cur
     return (currentLandlordEmail && nEmail === currentLandlordEmail) || (currentUser?.id && nUser === currentUser.id.toString());
   });
 
-  // 3. RECENT TENANT CHATS: Filter conversations belonging to this landlord
+  // 3. RECENT TENANT CHATS: Filter conversations belonging to this landlord (excluding roommate student chats)
   const landlordChats = (chats || []).filter(c => {
     if (!c) return false;
+    if (c.conversation_type === 'roommate_chat' || c.type === 'roommate_chat' || c.role === 'Student / Roommate') return false;
     const lEmail = (c.landlord_email || c.landlordEmail || '').toLowerCase().trim();
     const lId = (c.landlord_id || c.landlordId || '').toString();
     if (currentLandlordEmail && lEmail && lEmail === currentLandlordEmail) return true;
     if (currentUser?.id && lId && lId === currentUser.id.toString()) return true;
-    return true;
+    return false;
   });
 
   // Form management for adding/editing property

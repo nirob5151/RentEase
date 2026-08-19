@@ -995,8 +995,18 @@ export const dbService = {
         const { count: ldCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'landlord');
         if (ldCount !== null && ldCount !== undefined) landlordsCount = ldCount;
 
-        const { count: rCount } = await supabase.from('roommate_profiles').select('*', { count: 'exact', head: true });
-        if (rCount !== null && rCount !== undefined) roommatesCount = rCount;
+        // Query active roommate profiles applying same filter as Roommate Finder
+        const { data: rData } = await supabase
+          .from('roommate_profiles')
+          .select('id, name, student_name');
+        
+        if (rData) {
+          const validRoommates = rData.filter(r => {
+            const name = (r.name || r.student_name || '').toLowerCase();
+            return name && !name.includes('tanvir') && !name.includes('anas ahmed');
+          });
+          roommatesCount = validRoommates.length;
+        }
       } catch (err) {
         console.warn('Supabase getRentEaseStats error:', err);
       }
@@ -1006,6 +1016,11 @@ export const dbService = {
       listingsCount = listings.length;
       studentsCount = users.filter(u => (u.role || '').toLowerCase().includes('student')).length;
       landlordsCount = users.filter(u => (u.role || '').toLowerCase().includes('landlord')).length;
+      const roommates = (getLocal('roommates') || []).filter(r => {
+        const name = (r?.name || r?.student_name || '').toLowerCase();
+        return name && !name.includes('tanvir') && !name.includes('anas ahmed');
+      });
+      roommatesCount = roommates.length;
     }
 
     return {

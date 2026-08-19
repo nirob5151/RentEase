@@ -8,32 +8,40 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
   const [showPropertySelect, setShowPropertySelect] = useState(false);
   const [dbMessages, setDbMessages] = useState([]);
   const [liveAvatars, setLiveAvatars] = useState({});
+  const [liveNames, setLiveNames] = useState({});
   const logRef = useRef(null);
 
-  // 1. Fetch live participant profile pictures from Supabase profiles database
+  // 1. Fetch live participant profile data from Supabase profiles database
   useEffect(() => {
-    async function fetchLiveParticipantAvatars() {
+    async function fetchLiveParticipantData() {
       if (!chats || chats.length === 0) return;
       try {
         const usersList = await dbService.getUsers();
         if (Array.isArray(usersList)) {
           const avatarMap = {};
+          const nameMap = {};
           usersList.forEach(u => {
             const avatar = u.avatar_url || u.profile_picture || u.avatar;
-            if (u.email && avatar) {
-              avatarMap[u.email.toLowerCase().trim()] = avatar;
+            const name = u.name || u.full_name;
+            if (u.email) {
+              const emailKey = u.email.toLowerCase().trim();
+              if (avatar) avatarMap[emailKey] = avatar;
+              if (name) nameMap[emailKey] = name;
             }
-            if (u.name && avatar) {
-              avatarMap[u.name.toLowerCase().trim()] = avatar;
+            if (u.id) {
+              const idKey = String(u.id);
+              if (avatar) avatarMap[idKey] = avatar;
+              if (name) nameMap[idKey] = name;
             }
           });
           setLiveAvatars(avatarMap);
+          setLiveNames(nameMap);
         }
       } catch (err) {
-        console.warn('Error fetching live participant avatars:', err);
+        console.warn('Error fetching live participant data:', err);
       }
     }
-    fetchLiveParticipantAvatars();
+    fetchLiveParticipantData();
   }, [chats]);
 
   // Helper to dynamically resolve live avatar from Supabase profiles database
@@ -62,6 +70,35 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
     }
 
     return chat.avatar || chat.image || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80';
+  };
+
+  // Helper to dynamically resolve the chat partner display name relative to the logged-in user
+  const getChatPartnerName = (chat) => {
+    if (!chat || !currentUser) return chat?.name || 'Contact';
+
+    const currentEmail = (currentUser.email || '').toLowerCase().trim();
+    const currentId = (currentUser.id || '').toString();
+
+    const senderEmail = (chat.sender_email || chat.student_email || chat.senderEmail || '').toLowerCase().trim();
+    const senderId = (chat.sender_id || chat.student_id || chat.senderId || '').toString();
+
+    const recipientEmail = (chat.recipient_email || chat.landlord_email || chat.recipientEmail || '').toLowerCase().trim();
+    const recipientId = (chat.recipient_id || chat.landlord_id || chat.recipientId || '').toString();
+
+    // If logged-in user is recipient (or matches recipient email/id), display SENDER's name
+    if ((currentEmail && recipientEmail === currentEmail) || (currentId && recipientId === currentId)) {
+      if (chat.sender_name || chat.senderName) return chat.sender_name || chat.senderName;
+      if (senderEmail && liveNames[senderEmail]) return liveNames[senderEmail];
+      if (senderId && liveNames[senderId]) return liveNames[senderId];
+      return 'Contact';
+    }
+
+    // If logged-in user is sender, display RECIPIENT's name
+    if (chat.recipient_name || chat.recipientName) return chat.recipient_name || chat.recipientName;
+    if (recipientEmail && liveNames[recipientEmail]) return liveNames[recipientEmail];
+    if (recipientId && liveNames[recipientId]) return liveNames[recipientId];
+
+    return chat.name || 'Contact';
   };
 
   const activeChat = (chats || []).find(c => c.id === activeChatId) || (chats || [])[0];
@@ -147,7 +184,7 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
   };
 
   const filteredChats = (chats || []).filter(c => 
-    (c.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
+    (getChatPartnerName(c) || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
     (c.snippet || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -200,11 +237,11 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
               className={`chat-inbox-item ${activeChat?.id === c.id ? 'active' : ''}`}
               onClick={() => setActiveChatId(c.id)}
             >
-              <img src={getLiveAvatar(c)} alt={c.name} className="chat-inbox-avatar" />
+              <img src={getLiveAvatar(c)} alt={getChatPartnerName(c)} className="chat-inbox-avatar" />
               <div className="chat-inbox-details">
                 <div className="chat-inbox-title-row">
                   <span className="chat-inbox-name" style={{ fontWeight: '700' }}>
-                    {c.name} {c.property_title || c.propertyTitle || c.role ? `— ${c.property_title || c.propertyTitle || c.role}` : ''}
+                    {getChatPartnerName(c)} {c.property_title || c.propertyTitle || c.role ? `— ${c.property_title || c.propertyTitle || c.role}` : ''}
                   </span>
                   <span className="chat-inbox-time">{c.time}</span>
                 </div>
@@ -226,9 +263,9 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
           {/* Header */}
           <div className="chat-window-header">
             <div className="chat-window-header-user">
-              <img src={getLiveAvatar(activeChat)} alt={activeChat.name} className="chat-inbox-avatar" style={{ width: '2.25rem', height: '2.25rem' }} />
+              <img src={getLiveAvatar(activeChat)} alt={getChatPartnerName(activeChat)} className="chat-inbox-avatar" style={{ width: '2.25rem', height: '2.25rem' }} />
               <div className="chat-window-header-details">
-                <h3>{activeChat.name}</h3>
+                <h3>{getChatPartnerName(activeChat)}</h3>
                 <p style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                   <span>
                     {(activeChat.type === 'roommate_chat' || activeChat.conversation_type === 'roommate_chat' || activeChat.role === 'Student / Roommate')

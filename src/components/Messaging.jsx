@@ -7,7 +7,62 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
   const [searchQuery, setSearchQuery] = useState('');
   const [showPropertySelect, setShowPropertySelect] = useState(false);
   const [dbMessages, setDbMessages] = useState([]);
+  const [liveAvatars, setLiveAvatars] = useState({});
   const logRef = useRef(null);
+
+  // 1. Fetch live participant profile pictures from Supabase profiles database
+  useEffect(() => {
+    async function fetchLiveParticipantAvatars() {
+      if (!chats || chats.length === 0) return;
+      try {
+        const usersList = await dbService.getUsers();
+        if (Array.isArray(usersList)) {
+          const avatarMap = {};
+          usersList.forEach(u => {
+            const avatar = u.avatar_url || u.profile_picture || u.avatar;
+            if (u.email && avatar) {
+              avatarMap[u.email.toLowerCase().trim()] = avatar;
+            }
+            if (u.name && avatar) {
+              avatarMap[u.name.toLowerCase().trim()] = avatar;
+            }
+          });
+          setLiveAvatars(avatarMap);
+        }
+      } catch (err) {
+        console.warn('Error fetching live participant avatars:', err);
+      }
+    }
+    fetchLiveParticipantAvatars();
+  }, [chats]);
+
+  // Helper to dynamically resolve live avatar from Supabase profiles database
+  const getLiveAvatar = (chat) => {
+    if (!chat) return 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80';
+    
+    const contactEmail = (
+      (chat.landlord_email && chat.landlord_email !== currentUser?.email ? chat.landlord_email : '') ||
+      (chat.student_email && chat.student_email !== currentUser?.email ? chat.student_email : '') ||
+      (chat.recipient_email && chat.recipient_email !== currentUser?.email ? chat.recipient_email : '') ||
+      (chat.sender_email && chat.sender_email !== currentUser?.email ? chat.sender_email : '') ||
+      chat.email || ''
+    ).toLowerCase().trim();
+
+    const contactName = (chat.name || '').toLowerCase().trim();
+
+    if (contactEmail && liveAvatars[contactEmail]) {
+      return liveAvatars[contactEmail];
+    }
+    if (contactName && liveAvatars[contactName]) {
+      return liveAvatars[contactName];
+    }
+
+    if (currentUser && ((currentUser.name && currentUser.name.toLowerCase().trim() === contactName) || (currentUser.email && currentUser.email.toLowerCase().trim() === contactEmail))) {
+      return currentUser.avatar || currentUser.avatar_url || currentUser.profile_picture;
+    }
+
+    return chat.avatar || chat.image || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80';
+  };
 
   const activeChat = (chats || []).find(c => c.id === activeChatId) || (chats || [])[0];
 

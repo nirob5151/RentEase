@@ -1015,10 +1015,10 @@ export const dbService = {
     }
 
     return {
-      verified_listings: listingsCount || 6,
-      active_students: studentsCount || 2,
-      trusted_landlords: landlordsCount || 3,
-      roommate_profiles: roommatesCount || 1
+      verified_listings: listingsCount,
+      active_students: studentsCount,
+      trusted_landlords: landlordsCount,
+      roommate_profiles: roommatesCount
     };
   },
 

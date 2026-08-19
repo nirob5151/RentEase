@@ -1016,6 +1016,114 @@ export const dbService = {
     };
   },
 
+  // --- 16. ROOMMATE FINDER ENGINE ---
+  async getRoommates(currentUser = null) {
+    let results = [];
+    let fetched = false;
+
+    if (isConfigured) {
+      try {
+        const { data, error } = await supabase.from('roommate_profiles').select('*');
+        if (!error && Array.isArray(data)) {
+          results = data;
+          fetched = true;
+        }
+      } catch (e) {
+        console.warn('Supabase getRoommates error:', e);
+      }
+    }
+    
+    if (!fetched) {
+      results = getLocal('roommates') || [];
+    }
+
+    const currentEmail = (currentUser?.email || '').toLowerCase().trim();
+    const currentId = (currentUser?.id || '').toString();
+
+    // Exclude current user from candidate matches
+    return results.filter(r => {
+      if (!r) return false;
+      const rEmail = (r.email || r.student_email || '').toLowerCase().trim();
+      const rId = (r.student_id || r.id || r.user_id || '').toString();
+      if (currentEmail && rEmail && rEmail === currentEmail) return false;
+      if (currentId && rId && rId === currentId) return false;
+      return true;
+    });
+  },
+
+  async getMyRoommateProfile(currentUser) {
+    if (!currentUser) return null;
+    const cId = (currentUser.id || '').toString();
+    const cEmail = (currentUser.email || '').toLowerCase().trim();
+
+    if (isConfigured) {
+      try {
+        const { data, error } = await supabase.from('roommate_profiles').select('*');
+        if (!error && data && data.length > 0) {
+          const found = data.find(r => 
+            (r.student_id && String(r.student_id) === cId) ||
+            (r.student_email && r.student_email.toLowerCase().trim() === cEmail) ||
+            (r.email && r.email.toLowerCase().trim() === cEmail)
+          );
+          if (found) {
+            return {
+              id: found.id,
+              student_id: found.student_id,
+              email: found.student_email || found.email || cEmail,
+              name: found.student_name || found.name || currentUser.name || 'Student Roommate',
+              budget: found.budget || '6,500 BDT/mo',
+              sleepSchedule: found.sleep_schedule || found.sleepSchedule || 'Night Owl',
+              cleanliness: found.cleanliness_level || found.cleanliness || 'Clean',
+              studyHabits: found.study_habits || found.studyHabits || 'Quiet Study',
+              pets: found.pets || 'No Pets',
+              bio: found.bio || '',
+              gender: found.gender || 'Male',
+              is_active: found.is_active !== false
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('Supabase getMyRoommateProfile error:', e);
+      }
+    }
+
+    const localRoommates = getLocal('roommates') || [];
+    const myLocal = localRoommates.find(r => 
+      (r.student_id && String(r.student_id) === cId) ||
+      (r.email && (r.email || '').toLowerCase().trim() === cEmail) ||
+      r.isMyProfile
+    );
+    return myLocal || null;
+  },
+
+  async saveRoommate(roommateData) {
+    const current = getLocal('roommates') || [];
+    const updated = [roommateData, ...current.filter(r => r.id !== roommateData.id && r.student_id !== roommateData.student_id)];
+    setLocal('roommates', updated);
+
+    if (isConfigured) {
+      try {
+        await supabase.from('roommate_profiles').upsert([{
+          id: String(roommateData.id || 'rm_' + Date.now()),
+          student_id: String(roommateData.student_id || roommateData.id || ''),
+          student_name: roommateData.name || 'Student Roommate',
+          student_email: roommateData.email || '',
+          bio: roommateData.bio || '',
+          budget: roommateData.budget || '6,500 BDT/mo',
+          sleep_schedule: roommateData.sleepSchedule || 'Night Owl',
+          cleanliness_level: roommateData.cleanliness || 'Clean',
+          study_habits: roommateData.studyHabits || 'Quiet Study',
+          pets: roommateData.pets || 'No Pets',
+          gender: roommateData.gender || 'Male',
+          is_active: true
+        }]);
+      } catch (err) {
+        console.warn('Supabase saveRoommate error:', err);
+      }
+    }
+    return updated;
+  },
+
   // --- 11. TEMPORARY EMAIL VERIFICATIONS ---
   async saveTempVerification(email, code, signupData) {
     const key = (email || '').toLowerCase().trim();

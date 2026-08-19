@@ -27,78 +27,73 @@ function RoommateMatching({ currentUser, onStartChat }) {
   const [myBio, setMyBio] = useState('Computer Science student at BUBT. Looking for a quiet, organized study environment near campus.');
   const [isDiscoverable, setIsDiscoverable] = useState(true);
 
-  const defaultRoommatesSeed = [
-    {
-      id: 'rm_1',
-      name: 'Anas Ahmed',
-      uni: 'BUBT • Intake 51/8',
-      budget: '6,500 BDT/mo',
-      match: '98% Match',
-      bio: 'CSE 3rd year student. Night owl coder, quiet, clean, non-smoker. Looking for flatmate near BUBT.',
-      tags: ['Non-smoker', 'Night Owl', 'Studious', 'CSE Student'],
-      image: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=300&q=80',
-      gender: 'Male',
-      budgetTier: 'All',
-      dept: 'BSc in CSE',
-      sleepSchedule: 'Night Owl (1 AM - 8 AM)',
-      cleanliness: 'Very Organized & Tidy',
-      studyHabits: 'Quiet Library & Coding Sessions',
-      pets: 'No Pets',
-      is_active: true
-    },
-    {
-      id: 'rm_2',
-      name: 'Tanvir Hossain',
-      uni: 'BUBT • EEE Dept',
-      budget: '5,000 BDT/mo',
-      match: '94% Match',
-      bio: 'EEE student. Early riser, loves gaming & sports. Looking for roommate to share 2BR flat in Mirpur 2.',
-      tags: ['Non-smoker', 'Early Bird', 'Gamer'],
-      image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=300&q=80',
-      gender: 'Male',
-      budgetTier: 'All',
-      dept: 'BSc in EEE',
-      sleepSchedule: 'Early Bird (10 PM - 6 AM)',
-      cleanliness: 'Clean',
-      studyHabits: 'Group Study & Discussions',
-      pets: 'No Pets',
-      is_active: true
-    },
-    {
-      id: 'rm_3',
-      name: 'Nusrat Jahan',
-      uni: 'BUBT • BBA Dept',
-      budget: '7,000 BDT/mo',
-      match: '91% Match',
-      bio: 'BBA major. Friendly, tidy, non-smoker. Seeking female roommate for apartment near Mirpur 10.',
-      tags: ['Female Only', 'Non-smoker', 'Organized'],
-      image: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=300&q=80',
-      gender: 'Female',
-      budgetTier: 'All',
-      dept: 'BBA',
-      sleepSchedule: 'Regular (11 PM - 7 AM)',
-      cleanliness: 'Extremely Neat',
-      studyHabits: 'Quiet Study',
-      pets: 'Cat Friendly',
-      is_active: true
+  const defaultRoommatesSeed = [];
+
+  // Dynamic Realtime Match Percentage Calculator based on profile comparison
+  const calculateMatchScore = (candidate) => {
+    if (!candidate) return '85% Match';
+    
+    let score = 70; // Baseline compatibility for university peers
+
+    // 1. Sleep Schedule Compatibility (+10%)
+    if (mySleep && candidate.sleepSchedule) {
+      if (mySleep.toLowerCase().includes('night') && candidate.sleepSchedule.toLowerCase().includes('night')) score += 10;
+      else if (mySleep.toLowerCase().includes('early') && candidate.sleepSchedule.toLowerCase().includes('early')) score += 10;
+      else score += 5;
     }
-  ];
+
+    // 2. Cleanliness Compatibility (+10%)
+    if (myCleanliness && candidate.cleanliness) {
+      if (myCleanliness.toLowerCase().includes('tidy') && candidate.cleanliness.toLowerCase().includes('tidy')) score += 10;
+      else if (myCleanliness.toLowerCase().includes('clean') && candidate.cleanliness.toLowerCase().includes('clean')) score += 10;
+      else score += 5;
+    }
+
+    // 3. Study Habits Compatibility (+5%)
+    if (myStudy && candidate.studyHabits) {
+      if (myStudy.toLowerCase().includes('quiet') && candidate.studyHabits.toLowerCase().includes('quiet')) score += 5;
+      else score += 3;
+    }
+
+    // 4. University / Department Match (+3%)
+    if (currentUser?.university && candidate.uni && candidate.uni.toLowerCase().includes('bubt')) {
+      score += 3;
+    }
+
+    const finalScore = Math.min(98, Math.max(68, score));
+    return `${finalScore}% Match`;
+  };
 
   // Roommate profiles loaded from Supabase PostgreSQL with seed fallback
   const [roommates, setRoommates] = useState(defaultRoommatesSeed);
 
   useEffect(() => {
-    async function loadRoommates() {
+    async function loadRoommatesAndMyProfile() {
       try {
-        const data = await dbService.getRoommates();
-        if (data && data.length > 0) {
-          // Normalize loaded database records with safe fallback defaults
+        // 1. Fetch current logged in user's saved roommate profile
+        if (currentUser) {
+          const myProfile = await dbService.getMyRoommateProfile(currentUser);
+          if (myProfile) {
+            setMyProfileCreated(true);
+            if (myProfile.bio) setMyBio(myProfile.bio);
+            if (myProfile.budget) setMyBudget(myProfile.budget);
+            if (myProfile.sleepSchedule) setMySleep(myProfile.sleepSchedule);
+            if (myProfile.cleanliness) setMyCleanliness(myProfile.cleanliness);
+            if (myProfile.studyHabits) setMyStudy(myProfile.studyHabits);
+          }
+        }
+
+        // 2. Fetch all candidate roommate profiles
+        const data = await dbService.getRoommates(currentUser);
+        if (Array.isArray(data)) {
           const normalized = data.map(item => ({
             id: item.id || 'rm_' + Math.random(),
-            name: item.name || 'Student Roommate',
+            student_id: item.student_id || item.user_id,
+            email: item.email || item.student_email,
+            name: item.name || item.student_name || 'Student Roommate',
             uni: item.uni || 'BUBT • Student',
             budget: typeof item.budget === 'number' ? `${item.budget.toLocaleString()} BDT/mo` : (item.budget || '6,500 BDT/mo'),
-            match: item.match || '95% Match',
+            match: item.match || '92% Match',
             bio: item.bio || 'Looking for flatmate near BUBT campus.',
             tags: Array.isArray(item.tags) ? item.tags : (item.cleanliness ? [item.cleanliness, 'Non-smoker'] : ['Non-smoker', 'Studious']),
             image: item.image || item.avatar || 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=300&q=80',
@@ -116,8 +111,8 @@ function RoommateMatching({ currentUser, onStartChat }) {
         console.warn('Error loading roommates:', e);
       }
     }
-    loadRoommates();
-  }, []);
+    loadRoommatesAndMyProfile();
+  }, [currentUser]);
 
   const handleCreateProfileSubmit = async (e) => {
     e.preventDefault();
@@ -127,6 +122,7 @@ function RoommateMatching({ currentUser, onStartChat }) {
     const myProfileCard = {
       id: currentUser?.id || 'r_' + Date.now(),
       student_id: currentUser?.id,
+      email: currentUser?.email,
       isMyProfile: true,
       name: currentUser?.name || 'Registered Student',
       uni: `${currentUser?.university ? 'BUBT' : 'BUBT'} • ${currentUser?.intake || 'Intake 51/8'}`,
@@ -153,6 +149,21 @@ function RoommateMatching({ currentUser, onStartChat }) {
 
   const filteredRoommates = (roommates || []).filter(person => {
     if (!person) return false;
+
+    // 1. STRICTLY EXCLUDE CURRENT LOGGED-IN USER'S OWN PROFILE
+    const currentEmail = (currentUser?.email || '').toLowerCase().trim();
+    const currentId = (currentUser?.id || '').toString();
+    const currentName = (currentUser?.name || '').toLowerCase().trim();
+
+    const personEmail = (person.email || person.student_email || '').toLowerCase().trim();
+    const personId = (person.student_id || person.id || person.user_id || '').toString();
+    const personName = (person.name || '').toLowerCase().trim();
+
+    if (person.isMyProfile) return false;
+    if (currentEmail && personEmail && currentEmail === personEmail) return false;
+    if (currentId && personId && currentId === personId) return false;
+    if (currentName && personName && currentName === personName) return false;
+
     const uniText = person.uni || 'BUBT Student';
     if (filterUni !== 'All' && !uniText.toLowerCase().includes(filterUni.toLowerCase())) return false;
     if (filterBudget !== 'All' && person.budgetTier && person.budgetTier !== filterBudget) return false;
@@ -283,7 +294,7 @@ function RoommateMatching({ currentUser, onStartChat }) {
             {filteredRoommates.map((person, i) => (
             <div key={i} className="roommate-card" style={{ border: person.isMyProfile ? '2px solid #059669' : '1px solid var(--border-light)' }}>
               <span className="roommate-card-match-score" style={{ background: person.isMyProfile ? '#ecfdf5' : undefined, color: person.isMyProfile ? '#059669' : undefined }}>
-                <Sparkles size={12} fill={person.isMyProfile ? '#059669' : 'var(--secondary)'} /> {person.match}
+                <Sparkles size={12} fill={person.isMyProfile ? '#059669' : 'var(--secondary)'} /> {calculateMatchScore(person)}
               </span>
 
               <div className="roommate-card-header">

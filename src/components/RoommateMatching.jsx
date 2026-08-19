@@ -26,6 +26,7 @@ function RoommateMatching({ currentUser, onStartChat }) {
   const [myPets, setMyPets] = useState('No Pets');
   const [myBio, setMyBio] = useState('Computer Science student at BUBT. Looking for a quiet, organized study environment near campus.');
   const [isDiscoverable, setIsDiscoverable] = useState(true);
+  const [showMyCardPreview, setShowMyCardPreview] = useState(false);
 
   const defaultRoommatesSeed = [];
 
@@ -222,38 +223,103 @@ function RoommateMatching({ currentUser, onStartChat }) {
         </button>
       </div>
 
-      {/* DISCOVERABLE PROFILE BANNER STATUS */}
+      {/* DISCOVERABLE PROFILE BANNER & MY CARD PREVIEW */}
       {myProfileCreated && (
         <div style={{
           marginTop: '1.25rem',
-          background: 'rgba(16, 185, 129, 0.08)',
-          border: '1px solid rgba(16, 185, 129, 0.3)',
+          background: '#ecfdf5',
+          border: '1px solid #a7f3d0',
           borderRadius: 'var(--radius-md)',
-          padding: '1rem 1.25rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center'
+          padding: '1.25rem'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#059669', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <UserCheck size={22} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: showMyCardPreview ? '1.25rem' : '0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#059669', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <UserCheck size={22} />
+              </div>
+              <div>
+                <h4 style={{ fontWeight: 800, margin: 0, color: '#047857', fontSize: '0.95rem' }}>
+                  Your Roommate Profile is Live & Discoverable 🟢
+                </h4>
+                <p style={{ margin: '0.15rem 0 0 0', fontSize: '0.825rem', color: '#065f46' }}>
+                  Students searching for roommates can now view your preferences, send connection requests, or start a chat.
+                </p>
+              </div>
             </div>
-            <div>
-              <h4 style={{ fontWeight: 800, margin: 0, color: '#047857', fontSize: '0.95rem' }}>
-                Your Roommate Profile is Live & Discoverable 🟢
-              </h4>
-              <p style={{ margin: '0.15rem 0 0 0', fontSize: '0.825rem', color: 'var(--text-muted)' }}>
-                Students searching for roommates can now view your preferences, send connection requests, or start a chat.
-              </p>
+
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => setShowMyCardPreview(!showMyCardPreview)}
+                style={{ background: showMyCardPreview ? '#047857' : 'white', color: showMyCardPreview ? 'white' : '#047857', border: '1px solid #047857', padding: '0.45rem 0.9rem', borderRadius: 'var(--radius-sm)', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <UserCheck size={14} />
+                <span>{showMyCardPreview ? 'Hide My Profile Card' : 'Manage / View My Card'}</span>
+              </button>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                style={{ background: 'white', border: '1px solid #a7f3d0', color: '#047857', padding: '0.45rem 0.9rem', borderRadius: 'var(--radius-sm)', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <Edit3 size={14} />
+                <span>Edit Profile</span>
+              </button>
+              <button
+                onClick={handleDeleteProfile}
+                style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '0.45rem 0.9rem', borderRadius: 'var(--radius-sm)', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <Trash2 size={14} />
+                <span>Remove</span>
+              </button>
             </div>
           </div>
 
-          <button
-            onClick={() => setShowCreateModal(true)}
-            style={{ background: 'white', border: '1px solid #a7f3d0', color: '#047857', padding: '0.4rem 0.85rem', borderRadius: 'var(--radius-sm)', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer' }}
-          >
-            Manage Profile
-          </button>
+          {/* MY OWN PROFILE CARD VIEW (EXACT MATCH CARD FORMAT WITHOUT MATCH % / CONNECT BUTTONS) */}
+          {showMyCardPreview && (
+            <div style={{ borderTop: '1px solid #a7f3d0', paddingTop: '1.25rem', marginTop: '0.5rem' }}>
+              <div style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 800, letterSpacing: '0.05em', color: '#047857', textTransform: 'uppercase' }}>
+                  Live Preview • How other students see your card
+                </span>
+                <span className="roommate-card-match-score" style={{ background: '#059669', color: 'white', position: 'static' }}>
+                  <UserCheck size={12} fill="white" /> Your Published Profile
+                </span>
+              </div>
+
+              <div className="roommate-card" style={{ border: '2px solid #059669', background: 'white', maxWidth: '520px', margin: '0 auto' }}>
+                <div className="roommate-card-header">
+                  <img src={currentUser?.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=300&q=80'} alt={currentUser?.name} className="roommate-avatar" />
+                  <div>
+                    <h3 className="roommate-name">{currentUser?.name || 'Registered Student'}</h3>
+                    <p className="roommate-uni">BUBT • Intake 51/8</p>
+                    <span className="roommate-dept-badge">{currentUser?.department || 'BSc in CSE'}</span>
+                  </div>
+                </div>
+
+                <div className="roommate-budget-row">
+                  <span className="roommate-budget-label">Monthly Budget:</span>
+                  <span className="roommate-budget-value">{myBudget}</span>
+                </div>
+
+                <p className="roommate-bio">"{myBio}"</p>
+
+                <div className="roommate-tags">
+                  <span className="roommate-tag"><Sun size={12} /> {mySleep}</span>
+                  <span className="roommate-tag"><Brush size={12} /> {myCleanliness}</span>
+                  <span className="roommate-tag"><BookOpen size={12} /> {myStudy}</span>
+                  <span className="roommate-tag"><Ban size={12} /> {mySmoke}</span>
+                  <span className="roommate-tag"><Flame size={12} /> {myPets}</span>
+                </div>
+
+                <div className="roommate-card-actions" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                  <button className="btn-connect-request" style={{ background: 'var(--primary)', color: 'white' }} onClick={() => setShowCreateModal(true)}>
+                    <Edit3 size={15} /> Edit My Profile
+                  </button>
+                  <button className="btn-quick-message" style={{ background: '#fef2f2', color: '#dc2626', borderColor: '#fecaca' }} onClick={handleDeleteProfile}>
+                    <Trash2 size={15} /> Remove Profile
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

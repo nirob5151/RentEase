@@ -1,6 +1,6 @@
 /**
  * Email Verification Service
- * Supports Resend API / SMTP Web Gateway & Client Verification Banner
+ * Supports Resend API / Serverless Gateway (/api/send-otp)
  */
 
 export const emailService = {
@@ -11,15 +11,28 @@ export const emailService = {
     const recipient = (email || '').trim();
     const recipientName = (name || 'Student').trim();
 
-    console.log(`[EmailService] Dispatching 6-Digit OTP Code [${code}] to: ${recipient}`);
-
-    // If Resend / Web API service key is provided in .env
     const resendApiKey = import.meta.env.VITE_RESEND_API_KEY;
-    const fromEmail = import.meta.env.VITE_EMAIL_FROM || 'renteasy.web@gmail.com';
+    const fromEmail = import.meta.env.VITE_EMAIL_FROM || 'onboarding@resend.dev';
 
+    // 1. Try serverless backend route (/api/send-otp) if deployed
+    try {
+      const serverlessRes = await fetch('/api/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: recipient, code, name: recipientName })
+      });
+      if (serverlessRes.ok) {
+        console.log(`[EmailService] OTP dispatched via serverless API to: ${recipient}`);
+        return { success: true, message: `Verification email sent to ${recipient}` };
+      }
+    } catch {
+      // Ignore serverless 404 in pure static dev mode
+    }
+
+    // 2. Fallback: Direct Resend API dispatch if VITE_RESEND_API_KEY is provided
     if (resendApiKey) {
       try {
-        await fetch('https://api.resend.com/emails', {
+        const response = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -49,14 +62,23 @@ export const emailService = {
             `
           })
         });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          console.error('[EmailService] Resend API dispatch error:', response.status, errData);
+        } else {
+          console.log(`[EmailService] Resend API dispatch successful to: ${recipient}`);
+        }
       } catch (err) {
         console.warn('[EmailService] Remote dispatch notice:', err.message);
       }
+    } else {
+      console.warn('[EmailService] ⚠️ VITE_RESEND_API_KEY is not set. Please add VITE_RESEND_API_KEY to your .env file or Vercel Environment Variables to receive real OTP emails.');
     }
 
     return {
       success: true,
-      message: `Verification code ${code} dispatched to ${recipient}`
+      message: `Verification code sent to ${recipient}`
     };
   },
 
@@ -65,10 +87,8 @@ export const emailService = {
    */
   async sendNotificationEmail({ email, subject, title, message }) {
     const recipient = (email || '').trim();
-    console.log(`[EmailService] Sending status email to [${recipient}]: ${subject} - ${message}`);
-
     const resendApiKey = import.meta.env.VITE_RESEND_API_KEY;
-    const fromEmail = import.meta.env.VITE_EMAIL_FROM || 'renteasy.web@gmail.com';
+    const fromEmail = import.meta.env.VITE_EMAIL_FROM || 'onboarding@resend.dev';
 
     if (resendApiKey) {
       try {
@@ -107,3 +127,4 @@ export const emailService = {
     };
   }
 };
+

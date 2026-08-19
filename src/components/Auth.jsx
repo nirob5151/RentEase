@@ -67,7 +67,7 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotStep, setForgotStep] = useState(1); // 1: Email, 2: OTP, 3: New Password, 4: Success
   const [forgotInput, setForgotInput] = useState('');
-  const [forgotOtpDigits, setForgotOtpDigits] = useState(['7', '4', '9', '2', '1', '5']);
+  const [forgotOtpDigits, setForgotOtpDigits] = useState(['', '', '', '', '', '']);
   const [forgotResendTimer, setForgotResendTimer] = useState(60); // 60s resend timer
   const [forgotExpiryTimer, setForgotExpiryTimer] = useState(180); // 3 minutes (180s) OTP expiry
   const [forgotFailedAttempts, setForgotFailedAttempts] = useState(0); // max 3 allowed
@@ -82,7 +82,7 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
   const [successMsg, setSuccessMsg] = useState(null);
 
   // OTP State for Account Registration
-  const [otp, setOtp] = useState(['1', '2', '3', '4', '5', '6']);
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [resendTimer, setResendTimer] = useState(45);
   const otpRefs = [useRef(), useRef(), useRef(), useRef(), useRef(), useRef()];
   const forgotOtpRefs = [useRef(), useRef(), useRef(), useRef(), useRef(), useRef()];
@@ -230,9 +230,9 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
       name: signupData.name || name || 'Student'
     });
 
-    setOtp(newCode.split(''));
+    setOtp(['', '', '', '', '', '']);
     setError(null);
-    setSuccessMsg(`✓ New 6-digit code [${newCode}] sent to ${inputEmail}!`);
+    setSuccessMsg(`✓ A new 6-digit verification code has been sent to ${inputEmail}. Please check your inbox.`);
     setTimeout(() => setSuccessMsg(null), 5000);
   };
 
@@ -296,10 +296,10 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
     });
 
     // Step 6: Load verification screen with code input fields
-    setOtp(generatedCode.split(''));
+    setOtp(['', '', '', '', '', '']);
     setMode('verify_otp');
     setResendTimer(45); // Rate-limiting resend cooldown (45s)
-    setSuccessMsg(`✓ 6-Digit code [${generatedCode}] dispatched to ${inputEmail}`);
+    setSuccessMsg(`✓ 6-Digit verification code dispatched to ${inputEmail}. Please check your inbox.`);
     setTimeout(() => setSuccessMsg(null), 6000);
   };
 
@@ -411,25 +411,55 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
   // FORGOT PASSWORD WORKFLOW HANDLERS
 
   // Forgot Step 1: Send OTP
-  const handleForgotSendOtp = (e) => {
-    e.preventDefault();
+  const handleForgotSendOtp = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
     setForgotError(null);
 
-    if (!forgotInput.trim()) {
-      return setForgotError('Please enter your registered email or phone number.');
+    const targetEmail = (forgotInput || '').trim().toLowerCase();
+    if (!targetEmail || !targetEmail.includes('@')) {
+      return setForgotError('Please enter a valid registered email address.');
     }
 
+    const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
+    await dbService.saveTempVerification(targetEmail, generatedCode, { email: targetEmail, isPasswordReset: true });
+    await emailService.sendVerificationCode({
+      email: targetEmail,
+      code: generatedCode,
+      name: 'User'
+    });
+
     setForgotStep(2);
-    setForgotOtpDigits(['7', '4', '9', '2', '1', '5']); // prefilled demo code for easy testing
+    setForgotOtpDigits(['', '', '', '', '', '']);
     setForgotResendTimer(60); // 60 seconds resend timer
     setForgotExpiryTimer(180); // 3 minutes (180s) expiry timer
     setForgotFailedAttempts(0);
     setForgotIsBlocked(false);
   };
 
+  const handleForgotResendOtp = async () => {
+    if (forgotResendTimer > 0) return;
+    const targetEmail = (forgotInput || '').trim().toLowerCase();
+    if (!targetEmail) return setForgotError('Email missing.');
+
+    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+    await dbService.saveTempVerification(targetEmail, newCode, { email: targetEmail, isPasswordReset: true });
+    await emailService.sendVerificationCode({
+      email: targetEmail,
+      code: newCode,
+      name: 'User'
+    });
+
+    setForgotOtpDigits(['', '', '', '', '', '']);
+    setForgotResendTimer(60);
+    setForgotExpiryTimer(180);
+    setForgotFailedAttempts(0);
+    setForgotIsBlocked(false);
+    setForgotError(null);
+  };
+
   // Forgot Step 2: Verify OTP
-  const handleForgotVerifyOtp = (e) => {
-    e.preventDefault();
+  const handleForgotVerifyOtp = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
     setForgotError(null);
 
     if (forgotIsBlocked) {
@@ -440,14 +470,20 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
       return setForgotError('OTP expired. Please click Resend OTP to receive a new code.');
     }
 
-    const enteredCode = forgotOtpDigits.join('');
+    const enteredCode = forgotOtpDigits.join('').trim();
     if (enteredCode.length < 6) {
       return setForgotError('Please enter the complete 6-digit OTP code.');
     }
 
-    // Security Rule Check: Simulated OTP validation
-    if (enteredCode === '749215' || enteredCode === '123456') {
-      // Invalidate OTP immediately upon successful verification
+    const targetEmail = (forgotInput || '').trim().toLowerCase();
+    const storedRecord = await dbService.getTempVerification(targetEmail);
+
+    if (!storedRecord || Date.now() > storedRecord.expiresAt) {
+      return setForgotError('⏰ Verification code has EXPIRED or is invalid. Please click Resend OTP.');
+    }
+
+    if (enteredCode === storedRecord.code) {
+      await dbService.deleteTempVerification(targetEmail);
       setForgotStep(3);
       setForgotError(null);
       setNewPassword('');
@@ -1034,11 +1070,7 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                   <label className="auth-form-label" style={{ textAlign: 'center', display: 'block', marginBottom: '0.5rem', fontSize: '0.95rem' }}>
                     Enter 6-Digit OTP Code
                   </label>
-                  <div style={{ textAlign: 'center', marginBottom: '1rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    💡 Verification Code: <strong style={{ color: 'var(--primary)', letterSpacing: '3px', fontSize: '1.1rem' }}>{otp.join('') || '123456'}</strong>
-                  </div>
-
-                  <div className="otp-inputs-grid" onPaste={handleOtpPaste}>
+                  <div className="otp-inputs-grid" onPaste={handleOtpPaste} style={{ marginTop: '1rem' }}>
                     {otp.map((digit, idx) => (
                       <input
                         key={idx}
@@ -1055,36 +1087,8 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                   </div>
                 </div>
 
-                <div className="otp-resend-container" style={{ textAlign: 'center', marginTop: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOtp(['1', '2', '3', '4', '5', '6']);
-                      setError(null);
-                      if (role === 'student') {
-                        setMode('complete_profile_student');
-                      } else {
-                        setMode('verify_landlord_nid');
-                      }
-                    }}
-                    style={{
-                      background: 'rgba(37, 99, 235, 0.1)',
-                      border: '1px solid rgba(37, 99, 235, 0.3)',
-                      color: 'var(--primary)',
-                      padding: '0.4rem 0.85rem',
-                      borderRadius: '50px',
-                      fontSize: '0.82rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.35rem'
-                    }}
-                  >
-                    ⚡ Auto-fill 123456 & Continue
-                  </button>
-
-                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                <div className="otp-resend-container" style={{ textAlign: 'center', marginTop: '1.25rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                     Didn't receive the code?
                   </span>
                   

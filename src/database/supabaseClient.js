@@ -1034,15 +1034,19 @@ export const dbService = {
     }
     
     if (!fetched) {
-      results = getLocal('roommates') || [];
+      const rawLocal = getLocal('roommates') || [];
+      results = rawLocal.filter(r => r && r.name !== 'Tanvir Hossain' && r.name !== 'Anas Ahmed' && r.id !== 'rm_1' && r.id !== 'rm_2');
     }
 
     const currentEmail = (currentUser?.email || '').toLowerCase().trim();
     const currentId = (currentUser?.id || '').toString();
 
-    // Exclude current user from candidate matches
+    // Exclude current user from candidate matches and legacy seed names
     return results.filter(r => {
       if (!r) return false;
+      const rName = (r.name || r.student_name || '').toLowerCase().trim();
+      if (rName.includes('tanvir') || rName.includes('anas ahmed')) return false;
+
       const rEmail = (r.email || r.student_email || '').toLowerCase().trim();
       const rId = (r.student_id || r.id || r.user_id || '').toString();
       if (currentEmail && rEmail && rEmail === currentEmail) return false;
@@ -1436,82 +1440,6 @@ export const dbService = {
   // AUTOMATED DATABASE SEEDING UTILITY
   // ====================================================
   async seedAllDatabaseTables() {
-    if (!isConfigured) return { success: false, message: 'Supabase URL/Key not configured' };
-
-    try {
-      // 1. Seed Listings
-      const sampleListings = [
-        {
-          title: 'BUBT Student Hub - Single Room',
-          location: 'Mirpur 2 (0.2 miles from BUBT)',
-          price: 6500,
-          type: 'Private Room',
-          facilities: ['Wi-Fi Included', 'Furnished', 'Study Desk', 'Generator Backup'],
-          verified: true,
-          image: 'https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=600&q=80',
-          description: 'Ideal single room for BUBT CSE/EEE students. 3 minutes walk to main campus.'
-        },
-        {
-          title: 'Mirpur 10 Smart Student Flat',
-          location: 'Mirpur 10 Metro Station (0.5 miles)',
-          price: 12500,
-          type: 'Entire Apartment',
-          facilities: ['Wi-Fi Included', 'Private Bath', 'In-unit Laundry', 'Balcony'],
-          verified: true,
-          image: 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=600&q=80',
-          description: 'Modern 2-bedroom apartment perfect for 2-3 student roommates sharing expenses.'
-        },
-        {
-          title: 'Rupnagar Student Hostel & Mess',
-          location: 'Rupnagar R/A, Road 7',
-          price: 4200,
-          type: 'Shared Room',
-          facilities: ['Wi-Fi Included', 'Meal System', '24/7 Security', 'Cleaning Service'],
-          verified: true,
-          image: 'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?auto=format&fit=crop&w=600&q=80',
-          description: 'Premium student mess with home cooked 3-time meals and high-speed Wi-Fi.'
-        },
-        {
-          title: 'Green View Female Residence',
-          location: 'Mirpur 2, Block D',
-          price: 5500,
-          type: 'Private Room',
-          facilities: ['Wi-Fi Included', 'Female Only', 'Strict Security', 'Attached Bath'],
-          verified: true,
-          image: 'https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?auto=format&fit=crop&w=600&q=80',
-          description: 'Safe and quiet accommodation for female university students with 24/7 CCTV security.'
-        }
-      ];
-      await supabase.from('listings').insert(sampleListings);
-
-      // 2. Seed Bookings
-      await supabase.from('bookings').insert([
-        { id: 'b_101', tenant_name: 'Anas Ahmed', tenant_email: 'anas@cse.bubt.edu.bd', property_title: 'BUBT Student Hub - Single Room', price: 6500, status: 'Approved', date: '2026-08-15' },
-        { id: 'b_102', tenant_name: 'Tanvir Hossain', tenant_email: 'tanvir@eee.bubt.edu.bd', property_title: 'Mirpur 10 Smart Student Flat', price: 12500, status: 'Pending', date: '2026-08-18' }
-      ]);
-
-      // 3. Seed Payments
-      await supabase.from('payments').insert([
-        { id: 'p_201', receipt_id: 'REC-98210', tenant_name: 'Anas Ahmed', property_title: 'BUBT Student Hub - Single Room', amount: 6500, month: 'August 2026', status: 'Paid', date: '2026-08-15' },
-        { id: 'p_202', receipt_id: 'REC-98211', tenant_name: 'Tanvir Hossain', property_title: 'Mirpur 10 Smart Student Flat', amount: 12500, month: 'August 2026', status: 'Pending', date: '2026-08-18' }
-      ]);
-
-      // 4. Seed Profiles
-      await supabase.from('profiles').insert([
-        { id: '11111111-1111-4111-a111-111111111111', name: 'Anas Ahmed', email: 'anas@cse.bubt.edu.bd', phone: '+880 1711-223344', role: 'student', avatar_url: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6' },
-        { id: '22222222-2222-4222-a222-222222222222', name: 'Mehadi Hasan', email: 'mehadi@landlord.com', phone: '+880 1712-345678', role: 'landlord', avatar_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d' }
-      ]);
-
-      // 5. Seed Roommates
-      await supabase.from('roommate_profiles').insert([
-        { name: 'Anas Ahmed', student_id: '11111111-1111-4111-a111-111111111111', budget: 6500, bio: 'CSE 3rd year student. Night owl coder, quiet, clean, non-smoker.', gender: 'Male', cleanliness: 'Very Organized & Tidy' },
-        { name: 'Tanvir Hossain', budget: 5000, bio: 'EEE student. Early riser, gamer.', gender: 'Male', cleanliness: 'Clean' }
-      ]);
-
-      return { success: true, message: 'All Supabase Database tables seeded successfully!' };
-    } catch (err) {
-      console.error('Seed execution error:', err);
-      return { success: false, message: err.message };
-    }
+    return { success: true, message: 'Seeding disabled for clean production setup.' };
   }
 };

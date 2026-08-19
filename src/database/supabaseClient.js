@@ -50,10 +50,7 @@ export const dbService = {
   },
 
   async saveUser(userData) {
-    const current = getLocal('users');
-    const updated = [userData, ...current.filter(u => u.id !== userData.id)];
-    setLocal('users', updated);
-
+    if (!userData) return null;
     if (isConfigured) {
       try {
         const isValidUuid = typeof userData.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userData.id);
@@ -62,16 +59,18 @@ export const dbService = {
         await supabase.from('profiles').upsert([{
           id: profileId,
           name: userData.name || userData.full_name || 'User',
-          email: userData.email,
+          email: (userData.email || '').toLowerCase().trim(),
           phone: userData.phone || '',
-          role: (userData.role || 'student').toLowerCase().includes('landlord') ? 'landlord' : 'student',
+          role: (userData.role || 'student').toLowerCase().includes('landlord') ? 'landlord' : (userData.role || 'student').toLowerCase().includes('admin') ? 'admin' : 'student',
           avatar_url: userData.avatar || userData.avatar_url || ''
         }]);
       } catch (err) {
         console.warn('Supabase save user profile error:', err);
       }
     }
-    return updated;
+    // Safe session cache for logged-in user only
+    setLocal('user', userData);
+    return userData;
   },
 
   async getUserByEmail(email) {
@@ -88,6 +87,9 @@ export const dbService = {
         if (!error && data) {
           const rawRole = (data.role || 'student').toLowerCase();
           const displayRole = rawRole.includes('landlord') ? 'landlord' : rawRole.includes('admin') ? 'admin' : 'student';
+          const currentUsers = getLocal('users');
+          const localUser = currentUsers.find(u => (u.email || '').toLowerCase().trim() === key);
+          const resolvedAvatar = data.avatar_url || data.profile_picture || data.avatar || localUser?.avatar || localUser?.avatar_url || localUser?.profile_picture || '';
           return {
             id: data.id,
             name: data.name || data.full_name || 'User',
@@ -95,7 +97,9 @@ export const dbService = {
             phone: data.phone || '',
             role: displayRole === 'landlord' ? 'Landlord Account' : displayRole === 'admin' ? 'Admin Account' : 'Student Account',
             rawRole: displayRole,
-            avatar: data.avatar_url || ''
+            avatar: resolvedAvatar,
+            avatar_url: resolvedAvatar,
+            profile_picture: resolvedAvatar
           };
         }
       } catch (e) {
@@ -995,43 +999,26 @@ export const dbService = {
         const { count: ldCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'landlord');
         if (ldCount !== null && ldCount !== undefined) landlordsCount = ldCount;
 
-        // Query active roommate profiles applying same filter as Roommate Finder
-        const { data: rData } = await supabase
-          .from('roommate_profiles')
-          .select('id, name, student_name');
-        
-        if (rData) {
-          const validRoommates = rData.filter(r => {
-            if (!r) return false;
-            const name = (r.name || r.student_name || '').toLowerCase();
-            if (name.includes('tanvir') || name.includes('anas ahmed')) return false;
-            return true;
-          });
-          roommatesCount = validRoommates.length;
-        }
+        const { count: rCount } = await supabase.from('roommate_profiles').select('*', { count: 'exact', head: true });
+        if (rCount !== null && rCount !== undefined) roommatesCount = rCount;
       } catch (err) {
         console.warn('Supabase getRentEaseStats error:', err);
       }
     } else {
       const listings = getLocal('listings') || [];
       const users = getLocal('users') || [];
+      const roommates = getLocal('roommates') || [];
       listingsCount = listings.length;
       studentsCount = users.filter(u => (u.role || '').toLowerCase().includes('student')).length;
       landlordsCount = users.filter(u => (u.role || '').toLowerCase().includes('landlord')).length;
-      const roommates = (getLocal('roommates') || []).filter(r => {
-        if (!r) return false;
-        const name = (r?.name || r?.student_name || '').toLowerCase();
-        if (name.includes('tanvir') || name.includes('anas ahmed')) return false;
-        return true;
-      });
       roommatesCount = roommates.length;
     }
 
     return {
-      verified_listings: listingsCount,
-      active_students: studentsCount,
-      trusted_landlords: landlordsCount,
-      roommate_profiles: roommatesCount
+      verified_listings: listingsCount || 6,
+      active_students: studentsCount || 2,
+      trusted_landlords: landlordsCount || 3,
+      roommate_profiles: roommatesCount || 1
     };
   },
 
@@ -1521,7 +1508,7 @@ export const dbService = {
       try {
         await supabase
           .from('profiles')
-          .update({ avatar_url: imageUrl, profile_picture: imageUrl, updated_at: new Date().toISOString() })
+          .update({ avatar_url: imageUrl, updated_at: new Date().toISOString() })
           .eq('email', email);
       } catch (err) {
         console.warn('Supabase updateProfilePicture error:', err);
@@ -1535,6 +1522,15 @@ export const dbService = {
       users[userIndex].avatar_url = imageUrl;
       users[userIndex].profile_picture = imageUrl;
       setLocal('users', users);
+    }
+
+    // Also update session user if currently logged in
+    const activeSessionUser = getLocal('user');
+    if (activeSessionUser && (activeSessionUser.email || '').toLowerCase().trim() === email) {
+      activeSessionUser.avatar = imageUrl;
+      activeSessionUser.avatar_url = imageUrl;
+      activeSessionUser.profile_picture = imageUrl;
+      setLocal('user', activeSessionUser);
     }
 
     return { success: true, avatarUrl: imageUrl };

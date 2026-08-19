@@ -13,6 +13,7 @@ import CustomerCareWidget from './components/CustomerCareWidget';
 import { DEFAULT_LISTINGS, DEFAULT_CHATS } from './database/mockDb';
 import { dbService, isConfigured } from './database/supabaseClient';
 import DatabaseViewer from './components/DatabaseViewer';
+import ErrorBoundary from './components/ErrorBoundary';
 import { getAvatarUrl } from './utils/profileCompleteness';
 import { Home as HomeIcon, Search, Users, MessageSquare, FileText, Bell, LogOut, HelpCircle, Heart, Star, Settings, Plus, Calendar, CreditCard, BarChart3, ShieldCheck, AlertCircle, Lock, Database as DatabaseIcon, CheckCircle2, Mail, Phone } from 'lucide-react';
 
@@ -95,6 +96,12 @@ function App() {
   useEffect(() => {
     dbService.getListings().then(data => {
       if (data && data.length > 0) setListings(data);
+    });
+    dbService.getListings().then(fetchedListings => {
+      if (Array.isArray(fetchedListings) && fetchedListings.length > 0) {
+        setListings(fetchedListings);
+        localStorage.setItem('rentease_listings', JSON.stringify(fetchedListings));
+      }
     });
     dbService.getReviews().then(data => {
       if (Array.isArray(data)) setReviews(data);
@@ -629,10 +636,10 @@ function App() {
                 alt="User Avatar" 
                 className="nav-avatar-icon" 
                 onClick={() => {
-                  if (isLandlordUser) setCurrentPage('landlord_profile');
-                  else if (isAdminUser) setCurrentPage('admin_profile');
-                  else setCurrentPage('student_profile');
+                  setCurrentPage('dashboard');
                 }}
+                title="Go to My Dashboard"
+                style={{ cursor: 'pointer' }}
                 onError={(e) => {
                   e.target.onerror = null;
                   e.target.src = getAvatarUrl(currentUser);
@@ -848,109 +855,111 @@ function App() {
           </aside>
 
           <main className={`portal-content-pane ${currentPage === 'messages' ? 'no-scroll' : ''}`}>
-            {/* Robust Portal Content Router (Clean page separation) */}
-            {currentPage === 'messages' ? (
-              <Messaging 
-                chats={userChats}
-                activeChatId={activeChatId}
-                setActiveChatId={setActiveChatId}
-                onSendMessage={sendChatMessage}
-                onMarkAsRead={markChatAsRead}
-                listings={listings}
-                savedPropertyIds={savedPropertyIds}
-                userBookedPropertyIds={userBookedPropertyIds}
-                currentUser={currentUser}
-              />
-            ) : isAdminUser ? (
-              <AdminPanel 
-                currentUser={currentUser} 
-                activeTab={currentPage}
-                onTabChange={(tab) => setCurrentPage(tab)}
-                listings={listings}
-                onEditListing={editListing}
-                onDeleteListing={deleteListing}
-                onSaveSettings={handleSaveSettings}
-              />
-            ) : isLandlordUser ? (
-              <Dashboard 
-                listings={listings} 
-                onAddListing={addListing} 
-                onEditListing={editListing}
-                onDeleteListing={deleteListing}
-                currentUser={currentUser} 
-                activeTab={currentPage}
-                onTabChange={(tab) => setCurrentPage(tab)}
-                onSaveSettings={handleSaveSettings}
-                payments={sharedPayments}
-                onApprovePayment={approveSharedPayment}
-                chats={userChats}
-                notifications={notifications}
-                onStartChat={startChat}
-              />
-            ) : (currentPage === 'contract' || currentPage === 'contracts' || currentPage === 'rental_contracts') ? (
-              <ContractBuilder currentUser={currentUser} />
-            ) : currentPage === 'settings' ? (
-              <SettingsPage currentUser={currentUser} onSave={handleSaveSettings} />
-            ) : currentPage === 'saved' ? (
-              <div>
-                <div style={{ borderBottom: '1px solid var(--border-light)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
-                  <h2 style={{ fontSize: '1.75rem', fontWeight: '800' }}>Saved Properties ❤️</h2>
-                  <p style={{ color: 'var(--text-muted)' }}>Properties you bookmarked to review, compare, or share with potential roommates.</p>
-                </div>
+            {/* Robust Portal Content Router (Clean page separation & ErrorBoundary Protection) */}
+            <ErrorBoundary>
+              {currentPage === 'messages' ? (
+                <Messaging 
+                  chats={userChats}
+                  activeChatId={activeChatId}
+                  setActiveChatId={setActiveChatId}
+                  onSendMessage={sendChatMessage}
+                  onMarkAsRead={markChatAsRead}
+                  listings={listings}
+                  savedPropertyIds={savedPropertyIds}
+                  userBookedPropertyIds={userBookedPropertyIds}
+                  currentUser={currentUser}
+                />
+              ) : isAdminUser ? (
+                <AdminPanel 
+                  currentUser={currentUser} 
+                  activeTab={currentPage}
+                  onTabChange={(tab) => setCurrentPage(tab)}
+                  listings={listings}
+                  onEditListing={editListing}
+                  onDeleteListing={deleteListing}
+                  onSaveSettings={handleSaveSettings}
+                />
+              ) : isLandlordUser ? (
+                <Dashboard 
+                  listings={listings} 
+                  onAddListing={addListing} 
+                  onEditListing={editListing}
+                  onDeleteListing={deleteListing}
+                  currentUser={currentUser} 
+                  activeTab={currentPage}
+                  onTabChange={(tab) => setCurrentPage(tab)}
+                  onSaveSettings={handleSaveSettings}
+                  payments={sharedPayments}
+                  onApprovePayment={approveSharedPayment}
+                  chats={userChats}
+                  notifications={notifications}
+                  onStartChat={startChat}
+                />
+              ) : (currentPage === 'contract' || currentPage === 'contracts' || currentPage === 'rental_contracts') ? (
+                <ContractBuilder currentUser={currentUser} />
+              ) : currentPage === 'settings' ? (
+                <SettingsPage currentUser={currentUser} onSave={handleSaveSettings} />
+              ) : currentPage === 'saved' ? (
+                <div>
+                  <div style={{ borderBottom: '1px solid var(--border-light)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+                    <h2 style={{ fontSize: '1.75rem', fontWeight: '800' }}>Saved Properties ❤️</h2>
+                    <p style={{ color: 'var(--text-muted)' }}>Properties you bookmarked to review, compare, or share with potential roommates.</p>
+                  </div>
 
-                {listings.filter(l => (savedPropertyIds || []).includes(l.id)).length === 0 ? (
-                  <div className="glass-panel" style={{ padding: '3rem', background: 'white', border: '1px solid var(--border-light)', textAlign: 'center', borderRadius: 'var(--radius-lg)' }}>
-                    <Heart size={48} style={{ color: 'var(--text-light)', marginBottom: '1rem' }} />
-                    <h3 style={{ fontSize: '1.25rem', fontWeight: '700' }}>No Saved Listings Yet</h3>
-                    <p style={{ color: 'var(--text-muted)', marginTop: '0.25rem', marginBottom: '1.25rem' }}>Browse properties and hit the heart icon on any listing card to save it here.</p>
-                    <button className="btn-filter-apply" onClick={() => setCurrentPage('listings')}>
-                      Explore Housing Listings
-                    </button>
-                  </div>
-                ) : (
-                  <div className="listings-grid">
-                    {listings.filter(l => (savedPropertyIds || []).includes(l.id)).map(listing => (
-                      <div key={listing.id} className="listing-card">
-                        <div className="listing-image-wrapper">
-                          <img src={listing.image} alt={listing.title} className="listing-card-image" />
-                          <button 
-                            type="button" 
-                            style={{ position: 'absolute', top: '8px', right: '8px', background: '#ef4444', border: 'none', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 3 }}
-                            onClick={() => toggleSaveProperty(listing.id)}
-                            title="Remove from saved"
-                          >
-                            <Heart size={16} fill="white" color="white" />
-                          </button>
-                          <span className="badge badge-price">৳{listing.price.toLocaleString()} BDT/mo</span>
+                  {listings.filter(l => (savedPropertyIds || []).includes(l.id)).length === 0 ? (
+                    <div className="glass-panel" style={{ padding: '3rem', background: 'white', border: '1px solid var(--border-light)', textAlign: 'center', borderRadius: 'var(--radius-lg)' }}>
+                      <Heart size={48} style={{ color: 'var(--text-light)', marginBottom: '1rem' }} />
+                      <h3 style={{ fontSize: '1.25rem', fontWeight: '700' }}>No Saved Listings Yet</h3>
+                      <p style={{ color: 'var(--text-muted)', marginTop: '0.25rem', marginBottom: '1.25rem' }}>Browse properties and hit the heart icon on any listing card to save it here.</p>
+                      <button className="btn-filter-apply" onClick={() => setCurrentPage('listings')}>
+                        Explore Housing Listings
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="listings-grid">
+                      {listings.filter(l => (savedPropertyIds || []).includes(l.id)).map(listing => (
+                        <div key={listing.id} className="listing-card">
+                          <div className="listing-image-wrapper">
+                            <img src={listing.image} alt={listing.title} className="listing-card-image" />
+                            <button 
+                              type="button" 
+                              style={{ position: 'absolute', top: '8px', right: '8px', background: '#ef4444', border: 'none', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 3 }}
+                              onClick={() => toggleSaveProperty(listing.id)}
+                              title="Remove from saved"
+                            >
+                              <Heart size={16} fill="white" color="white" />
+                            </button>
+                            <span className="badge badge-price">৳{listing.price.toLocaleString()} BDT/mo</span>
+                          </div>
+                          <div className="listing-info">
+                            <h3 className="listing-title">{listing.title}</h3>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '0.75rem' }}>{listing.location}</p>
+                            <button className="btn-card-action" onClick={() => { setSelectedListing(listing); setCurrentPage('listings'); }}>
+                              View Property Details
+                            </button>
+                          </div>
                         </div>
-                        <div className="listing-info">
-                          <h3 className="listing-title">{listing.title}</h3>
-                          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '0.75rem' }}>{listing.location}</p>
-                          <button className="btn-card-action" onClick={() => { setSelectedListing(listing); setCurrentPage('listings'); }}>
-                            View Property Details
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <StudentDashboard 
-                currentUser={currentUser} 
-                activeTab={currentPage}
-                onNavigate={(tab) => setCurrentPage(tab)}
-                onStartChat={startChat}
-                onSaveSettings={handleSaveSettings}
-                payments={sharedPayments}
-                onAddPayment={addSharedPayment}
-                savedPropertyIds={savedPropertyIds}
-                userBookedPropertyIds={userBookedPropertyIds}
-                listings={listings}
-                chats={chats}
-                notifications={notifications}
-              />
-            )}
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <StudentDashboard 
+                  currentUser={currentUser} 
+                  activeTab={currentPage}
+                  onNavigate={(tab) => setCurrentPage(tab)}
+                  onStartChat={startChat}
+                  onSaveSettings={handleSaveSettings}
+                  payments={sharedPayments}
+                  onAddPayment={addSharedPayment}
+                  savedPropertyIds={savedPropertyIds}
+                  userBookedPropertyIds={userBookedPropertyIds}
+                  listings={listings}
+                  chats={chats}
+                  notifications={notifications}
+                />
+              )}
+            </ErrorBoundary>
           </main>
         </div>
       ) : (

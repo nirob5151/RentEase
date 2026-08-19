@@ -27,91 +27,108 @@ function RoommateMatching({ currentUser, onStartChat }) {
   const [myBio, setMyBio] = useState('Computer Science student at BUBT. Looking for a quiet, organized study environment near campus.');
   const [isDiscoverable, setIsDiscoverable] = useState(true);
 
-  // Default seed roommate profiles
-  const [roommates, setRoommates] = useState([
+  const defaultRoommatesSeed = [
     {
-      id: 'r_1',
-      name: 'Bushra',
-      uni: 'BUBT • Senior',
-      budget: '5,000 BDT/mo',
-      match: '98%',
-      bio: 'Biology major. Love weekend hikes and quiet study sessions. Very organized!',
-      tags: ['Quiet', 'Non-smoker', 'Morning Person'],
-      image: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=300&q=80',
-      gender: 'Female',
-      budgetTier: 'low',
-      dept: 'Department of Biology & Life Sciences',
-      sleepSchedule: 'Early Riser (6 AM - 10 PM)',
+      id: 'rm_1',
+      name: 'Anas Ahmed',
+      uni: 'BUBT • Intake 51/8',
+      budget: '6,500 BDT/mo',
+      match: '98% Match',
+      bio: 'CSE 3rd year student. Night owl coder, quiet, clean, non-smoker. Looking for flatmate near BUBT.',
+      tags: ['Non-smoker', 'Night Owl', 'Studious', 'CSE Student'],
+      image: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=300&q=80',
+      gender: 'Male',
+      budgetTier: 'All',
+      dept: 'BSc in CSE',
+      sleepSchedule: 'Night Owl (1 AM - 8 AM)',
       cleanliness: 'Very Organized & Tidy',
-      studyHabits: 'Quiet Library Study Sessions',
-      pets: 'No Pets Allowed',
-      food: 'Homemade & Healthy'
+      studyHabits: 'Quiet Library & Coding Sessions',
+      pets: 'No Pets',
+      is_active: true
     },
     {
-      id: 'r_2',
-      name: 'Anas',
-      uni: 'BUBT • Junior',
-      budget: '1,450 BDT/mo',
-      match: '92%',
-      bio: 'Computer Science. I spend a lot of time coding. Looking for a chill environment.',
-      tags: ['Night Owl', 'Studious', 'Fitness Enthusiast'],
+      id: 'rm_2',
+      name: 'Tanvir Hossain',
+      uni: 'BUBT • EEE Dept',
+      budget: '5,000 BDT/mo',
+      match: '94% Match',
+      bio: 'EEE student. Early riser, loves gaming & sports. Looking for roommate to share 2BR flat in Mirpur 2.',
+      tags: ['Non-smoker', 'Early Bird', 'Gamer'],
       image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=300&q=80',
       gender: 'Male',
       budgetTier: 'All',
-      dept: 'Computer Science & Engineering (CSE)',
-      sleepSchedule: 'Night Owl (1 AM - 8 AM)',
-      cleanliness: 'Moderate & Organized Workspace',
-      studyHabits: 'Late Night Coding & Hackathons',
-      pets: 'Pet Friendly',
-      food: 'Flexible / Fast Food'
-    },
-    {
-      id: 'r_3',
-      name: 'Shimu',
-      uni: 'BUBT • BSC',
-      budget: '1,800 BDT/mo',
-      match: '89%',
-      bio: 'History of Art. I love visiting galleries and I\'m very tidy. Looking for a fellow grad..',
-      tags: ['Very Clean', 'Early Bird', 'No Pets'],
-      image: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?auto=format&fit=crop&w=300&q=80',
-      gender: 'Female',
-      budgetTier: 'high',
-      dept: 'Department of Art & Humanities',
-      sleepSchedule: 'Early Bird (7 AM - 11 PM)',
-      cleanliness: 'Extremely Tidy & Spotless',
-      studyHabits: 'Quiet Reading Room',
+      dept: 'BSc in EEE',
+      sleepSchedule: 'Early Bird (10 PM - 6 AM)',
+      cleanliness: 'Clean',
+      studyHabits: 'Group Study & Discussions',
       pets: 'No Pets',
-      food: 'Vegetarian / Home Cooking'
+      is_active: true
     },
     {
-      id: 'r_4',
-      name: 'Nirob',
-      uni: 'BUBT • Sophomore',
-      budget: '1,100 BDT/mo',
-      match: '85%',
-      bio: 'Economics major. I enjoy cooking for friends and exploring local coffee shops.',
-      tags: ['Social', 'Chef', 'Extrovert'],
-      image: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=300&q=80',
-      gender: 'Male',
+      id: 'rm_3',
+      name: 'Nusrat Jahan',
+      uni: 'BUBT • BBA Dept',
+      budget: '7,000 BDT/mo',
+      match: '91% Match',
+      bio: 'BBA major. Friendly, tidy, non-smoker. Seeking female roommate for apartment near Mirpur 10.',
+      tags: ['Female Only', 'Non-smoker', 'Organized'],
+      image: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=300&q=80',
+      gender: 'Female',
       budgetTier: 'All',
-      dept: 'Department of Economics & Business',
-      sleepSchedule: 'Flexible Hours',
-      cleanliness: 'Clean & Shared House Chores',
-      studyHabits: 'Group Discussions & Coffee Shops',
-      pets: 'Loves Dogs',
-      food: 'Loves Cooking & Sharing Meals'
+      dept: 'BBA',
+      sleepSchedule: 'Regular (11 PM - 7 AM)',
+      cleanliness: 'Extremely Neat',
+      studyHabits: 'Quiet Study',
+      pets: 'Cat Friendly',
+      is_active: true
     }
-  ]);
+  ];
 
-  const handleCreateProfileSubmit = (e) => {
+  // Roommate profiles loaded from Supabase PostgreSQL with seed fallback
+  const [roommates, setRoommates] = useState(defaultRoommatesSeed);
+
+  useEffect(() => {
+    async function loadRoommates() {
+      try {
+        const data = await dbService.getRoommates();
+        if (data && data.length > 0) {
+          // Normalize loaded database records with safe fallback defaults
+          const normalized = data.map(item => ({
+            id: item.id || 'rm_' + Math.random(),
+            name: item.name || 'Student Roommate',
+            uni: item.uni || 'BUBT • Student',
+            budget: typeof item.budget === 'number' ? `${item.budget.toLocaleString()} BDT/mo` : (item.budget || '6,500 BDT/mo'),
+            match: item.match || '95% Match',
+            bio: item.bio || 'Looking for flatmate near BUBT campus.',
+            tags: Array.isArray(item.tags) ? item.tags : (item.cleanliness ? [item.cleanliness, 'Non-smoker'] : ['Non-smoker', 'Studious']),
+            image: item.image || item.avatar || 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=300&q=80',
+            gender: item.gender || 'Male',
+            budgetTier: 'All',
+            sleepSchedule: item.sleepSchedule || item.sleep_schedule || 'Night Owl',
+            cleanliness: item.cleanliness || 'Clean',
+            studyHabits: item.studyHabits || item.study_habits || 'Quiet Study',
+            pets: item.pets || 'No Pets',
+            is_active: item.is_active !== false
+          }));
+          setRoommates(normalized);
+        }
+      } catch (e) {
+        console.warn('Error loading roommates:', e);
+      }
+    }
+    loadRoommates();
+  }, []);
+
+  const handleCreateProfileSubmit = async (e) => {
     e.preventDefault();
     setMyProfileCreated(true);
     setShowCreateModal(false);
 
     const myProfileCard = {
-      id: 'my_roommate_profile',
+      id: currentUser?.id || 'r_' + Date.now(),
+      student_id: currentUser?.id,
       isMyProfile: true,
-      name: currentUser?.name || 'Maruf Billah Anas',
+      name: currentUser?.name || 'Registered Student',
       uni: `${currentUser?.university ? 'BUBT' : 'BUBT'} • ${currentUser?.intake || 'Intake 51/8'}`,
       budget: myBudget,
       match: '100% (You)',
@@ -125,17 +142,21 @@ function RoommateMatching({ currentUser, onStartChat }) {
       cleanliness: myCleanliness,
       studyHabits: myStudy,
       pets: myPets,
-      food: 'Home Cooking & Healthy'
+      food: 'Home Cooking & Healthy',
+      is_active: true
     };
 
-    setRoommates(prev => [myProfileCard, ...prev.filter(r => !r.isMyProfile)]);
+    setRoommates(prev => [myProfileCard, ...prev.filter(r => r.id !== myProfileCard.id)]);
+    await dbService.saveRoommate(myProfileCard);
     alert('✨ Your Roommate Profile is now PUBLIC & DISCOVERABLE! Other students can connect and message you.');
   };
 
-  const filteredRoommates = roommates.filter(person => {
-    if (filterUni !== 'All' && !person.uni.includes(filterUni)) return false;
-    if (filterBudget !== 'All' && person.budgetTier !== filterBudget) return false;
-    if (filterGender !== 'Any' && person.gender !== filterGender) return false;
+  const filteredRoommates = (roommates || []).filter(person => {
+    if (!person) return false;
+    const uniText = person.uni || 'BUBT Student';
+    if (filterUni !== 'All' && !uniText.toLowerCase().includes(filterUni.toLowerCase())) return false;
+    if (filterBudget !== 'All' && person.budgetTier && person.budgetTier !== filterBudget) return false;
+    if (filterGender !== 'Any' && person.gender && person.gender !== filterGender) return false;
     return true;
   });
 
@@ -235,8 +256,31 @@ function RoommateMatching({ currentUser, onStartChat }) {
 
       {/* Roommates Grid */}
       <section style={{ marginTop: '1.5rem' }}>
-        <div className="roommates-grid">
-          {filteredRoommates.map((person, i) => (
+        {filteredRoommates.length === 0 ? (
+          <div style={{
+            textAlign: 'center',
+            padding: '4rem 2rem',
+            background: 'white',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border-light)',
+            marginTop: '1rem'
+          }}>
+            <Users size={48} style={{ color: 'var(--text-light)', marginBottom: '1rem' }} />
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-dark)' }}>No Roommate Profiles Found</h3>
+            <p style={{ color: 'var(--text-muted)', marginTop: '0.35rem', maxWidth: '480px', margin: '0.35rem auto 1.5rem' }}>
+              Be the first student to publish your roommate preferences and start matching with university peers!
+            </p>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="btn-filter-apply"
+              style={{ padding: '0.65rem 1.5rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem', margin: '0 auto' }}
+            >
+              <Plus size={18} /> Create Roommate Profile
+            </button>
+          </div>
+        ) : (
+          <div className="roommates-grid">
+            {filteredRoommates.map((person, i) => (
             <div key={i} className="roommate-card" style={{ border: person.isMyProfile ? '2px solid #059669' : '1px solid var(--border-light)' }}>
               <span className="roommate-card-match-score" style={{ background: person.isMyProfile ? '#ecfdf5' : undefined, color: person.isMyProfile ? '#059669' : undefined }}>
                 <Sparkles size={12} fill={person.isMyProfile ? '#059669' : 'var(--secondary)'} /> {person.match}
@@ -278,7 +322,7 @@ function RoommateMatching({ currentUser, onStartChat }) {
                 {!person.isMyProfile && (
                   <>
                     <button 
-                      className={`btn-card-primary ${connectedList.includes(person.name) ? 'connected' : ''}`}
+                      className={'btn-card-primary ' + (connectedList.includes(person.name) ? 'connected' : '')}
                       style={{ 
                         flex: 1, 
                         padding: '0.5rem', 
@@ -297,8 +341,8 @@ function RoommateMatching({ currentUser, onStartChat }) {
                     <button 
                       className="btn-card-secondary"
                       style={{ padding: '0.5rem', color: 'var(--primary)', borderColor: 'var(--primary-glow)' }}
-                      onClick={() => onStartChat(person.name, `Hi ${person.name}! I saw your roommate profile on RentEase and would love to discuss shared flat availability.`)}
-                      title={`Message ${person.name}`}
+                      onClick={() => onStartChat(person.name, 'Hi ' + person.name + '! I saw your roommate profile on RentEase and would love to discuss shared flat availability.', 'Student / Roommate', person.image)}
+                      title={'Message ' + person.name}
                     >
                       <MessageSquare size={16} />
                     </button>
@@ -308,7 +352,8 @@ function RoommateMatching({ currentUser, onStartChat }) {
             </div>
           ))}
         </div>
-      </section>
+      )}
+    </section>
 
       {/* VIEW ROOMMATE DETAILED PROFILE MODAL */}
       {selectedRoommate && (
@@ -381,8 +426,9 @@ function RoommateMatching({ currentUser, onStartChat }) {
                   style={{ flex: 1, padding: '0.75rem', justifyContent: 'center', color: 'var(--primary)' }}
                   onClick={() => {
                     const name = selectedRoommate.name;
+                    const avatar = selectedRoommate.image;
                     setSelectedRoommate(null);
-                    onStartChat(name, `Hi ${name}! Let's connect on RentEase.`);
+                    onStartChat(name, `Hi ${name}! Let's connect on RentEase.`, 'Student / Roommate', avatar);
                   }}
                 >
                   <MessageSquare size={16} /> 💬 Start Chat

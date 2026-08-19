@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { Search, MapPin, SlidersHorizontal, ShieldCheck, Star, MessageSquare, Phone, X, Grid, Map, Check, Eye, HelpCircle, Calendar, MessageCircle, ChevronLeft, ChevronRight, Wifi, Wind, Car, Coffee } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, MapPin, SlidersHorizontal, ShieldCheck, Star, MessageSquare, Phone, X, Grid, Map, Check, Eye, HelpCircle, Calendar, MessageCircle, ChevronLeft, ChevronRight, Wifi, Wind, Car, Coffee, Heart } from 'lucide-react';
+import { getListingRating, getListingReviews } from '../utils/ratingUtils';
 
-function Listings({ listings, selectedListing, setSelectedListing, onStartChat, onSubmitReview }) {
+function Listings({ listings, selectedListing, setSelectedListing, savedPropertyIds = [], onToggleSave, onRecordBooking, onStartChat, onSubmitReview, reviews = [] }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('All');
   const [maxPrice, setMaxPrice] = useState(3000);
@@ -27,47 +28,64 @@ function Listings({ listings, selectedListing, setSelectedListing, onStartChat, 
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
 
+  // Dynamic Pagination State
+  const [currentPageNum, setCurrentPageNum] = useState(1);
+  const ITEMS_PER_PAGE = 6;
+
+  useEffect(() => {
+    setCurrentPageNum(1);
+  }, [searchQuery, filterType, maxPrice, filterVerified, locationFilter, selectedRoomTypes, selectedAmenities]);
+
   // Extract unique locations
-  const locations = ['All', ...new Set(listings.map(item => {
-    if (item.location.includes('Mirpur 2')) return 'Mirpur 2';
-    if (item.location.includes('Mirpur 10')) return 'Mirpur 10';
-    if (item.location.includes('Mirpur 1')) return 'Mirpur 1';
-    if (item.location.includes('Mirpur 11')) return 'Mirpur 11';
+  const safeListings = Array.isArray(listings) ? listings : [];
+  const locations = ['All', ...new Set(safeListings.map(item => {
+    const loc = (item?.location || '').toLowerCase();
+    if (loc.includes('mirpur 2')) return 'Mirpur 2';
+    if (loc.includes('mirpur 10')) return 'Mirpur 10';
+    if (loc.includes('mirpur 1')) return 'Mirpur 1';
+    if (loc.includes('mirpur 11')) return 'Mirpur 11';
     return 'Other';
   }))];
 
   // Filtering Logic
-  const filteredListings = listings.filter(item => {
-    const matchesSearch = item.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          item.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          item.description.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredListings = safeListings.filter(item => {
+    if (!item) return false;
+    const titleText = (item.title || '').toLowerCase();
+    const locText = (item.location || '').toLowerCase();
+    const descText = (item.description || '').toLowerCase();
+    const searchLower = (searchQuery || '').toLowerCase();
+
+    const matchesSearch = titleText.includes(searchLower) || 
+                          locText.includes(searchLower) ||
+                          descText.includes(searchLower);
     
-    const matchesPrice = item.price <= maxPrice;
-    const matchesVerified = !filterVerified || item.verified;
+    const priceVal = typeof item.price === 'number' ? item.price : (parseFloat(item.price) || 0);
+    const matchesPrice = priceVal <= maxPrice;
+    const matchesVerified = !filterVerified || Boolean(item.verified);
     
     let matchesLocation = true;
     if (locationFilter !== 'All') {
-      matchesLocation = item.location.toLowerCase().includes(locationFilter.toLowerCase());
+      matchesLocation = locText.includes((locationFilter || '').toLowerCase());
     }
 
-    // Room Type Filter (If none are selected, show all. Otherwise, show matching)
     const activeRoomTypes = Object.keys(selectedRoomTypes).filter(type => selectedRoomTypes[type]);
     const matchesRoomType = activeRoomTypes.length === 0 || activeRoomTypes.includes(item.type);
 
-    // Amenities Filter (Must match all checked amenities)
     const activeAmenities = Object.keys(selectedAmenities).filter(amenity => selectedAmenities[amenity]);
+    const facilitiesList = Array.isArray(item.facilities) ? item.facilities : [];
+
     const matchesAmenities = activeAmenities.every(amenity => {
       if (amenity === 'Wi-Fi') {
-        return item.facilities.some(f => f.toLowerCase().includes('wifi'));
+        return facilitiesList.some(f => (f || '').toLowerCase().includes('wifi'));
       }
       if (amenity === 'Laundry') {
-        return item.facilities.some(f => f.toLowerCase().includes('laundry'));
+        return facilitiesList.some(f => (f || '').toLowerCase().includes('laundry'));
       }
       if (amenity === 'Gym Access') {
-        return item.facilities.some(f => f.toLowerCase().includes('gym'));
+        return facilitiesList.some(f => (f || '').toLowerCase().includes('gym'));
       }
       if (amenity === 'Furnished') {
-        return item.facilities.some(f => f.toLowerCase().includes('furnished'));
+        return facilitiesList.some(f => (f || '').toLowerCase().includes('furnished'));
       }
       return true;
     });
@@ -83,7 +101,12 @@ function Listings({ listings, selectedListing, setSelectedListing, onStartChat, 
       author: reviewerName,
       rating: reviewRating,
       date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      comment: reviewComment
+      comment: reviewComment,
+      listingId: selectedListing?.id,
+      listing_id: selectedListing?.id,
+      propertyId: selectedListing?.id,
+      property_id: selectedListing?.id,
+      target: selectedListing?.title || 'Property'
     };
 
     onSubmitReview(selectedListing.id, newReview);
@@ -132,9 +155,9 @@ function Listings({ listings, selectedListing, setSelectedListing, onStartChat, 
               <div className="filter-group">
                 <label className="filter-label">Rent Range</label>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  <span>$400</span>
-                  <span style={{ color: 'var(--primary)', fontWeight: '700' }}>${maxPrice.toLocaleString()}+</span>
-                  <span>$3,000</span>
+                  <span>৳3,500</span>
+                  <span style={{ color: 'var(--primary)', fontWeight: '700' }}>৳{maxPrice.toLocaleString()} BDT</span>
+                  <span>৳25,000</span>
                 </div>
                 <input 
                   type="range" 
@@ -248,64 +271,141 @@ function Listings({ listings, selectedListing, setSelectedListing, onStartChat, 
                 </div>
               ) : (
                 <div className="listings-grid">
-                  {filteredListings.map(listing => (
-                    <div key={listing.id} className="listing-card">
-                      <div className="listing-image-wrapper">
-                        <img 
-                          src={listing.image} 
-                          alt={listing.title} 
-                          className="listing-card-image" 
-                          onError={(e) => {
-                            e.target.src = "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=600&q=80";
-                          }}
-                        />
-                        {listing.verified && (
-                          <span className="badge badge-verified" style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', textTransform: 'none', borderRadius: '4px', fontSize: '0.7rem' }}>
-                            <ShieldCheck size={12} /> Verified Listing
-                          </span>
-                        )}
-                        <span className="badge badge-price">${listing.price.toLocaleString()}/mo</span>
-                      </div>
+                  {filteredListings.slice((currentPageNum - 1) * ITEMS_PER_PAGE, (currentPageNum - 1) * ITEMS_PER_PAGE + ITEMS_PER_PAGE).map(listing => {
+                    const ratingInfo = getListingRating(listing, reviews);
+                    const locText = listing.location || 'Mirpur, Dhaka';
+                    const displayLoc = locText.includes('BUBT') ? 'BUBT Campus (0.4 miles)' : locText;
+                    const facilitiesList = Array.isArray(listing.facilities) ? listing.facilities : ['Wi-Fi', 'Furnished'];
+                    const priceVal = typeof listing.price === 'number' ? listing.price : (parseFloat(listing.price) || 0);
 
-                      <div className="listing-info">
-                        <div className="listing-title-row">
-                          <h3 className="listing-title">{listing.title}</h3>
-                          <div className="listing-rating">
-                            <Star size={14} fill="var(--warning)" color="var(--warning)" />
-                            {listing.landlord.rating}
+                    return (
+                      <div key={listing.id || 'list_' + Math.random()} className="listing-card">
+                        <div className="listing-image-wrapper">
+                          <img 
+                            src={listing.image || "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=600&q=80"} 
+                            alt={listing.title || 'Property'} 
+                            className="listing-card-image" 
+                            onError={(e) => {
+                              e.target.src = "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=600&q=80";
+                            }}
+                          />
+                          <button
+                            type="button"
+                            style={{
+                              position: 'absolute',
+                              top: '8px',
+                              right: '8px',
+                              background: (savedPropertyIds || []).includes(listing.id) ? '#ef4444' : 'rgba(255, 255, 255, 0.9)',
+                              border: 'none',
+                              borderRadius: '50%',
+                              width: '32px',
+                              height: '32px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              zIndex: 3,
+                              boxShadow: 'var(--shadow-sm)'
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onToggleSave) onToggleSave(listing.id);
+                            }}
+                            title={(savedPropertyIds || []).includes(listing.id) ? 'Remove from Saved' : 'Save Property'}
+                          >
+                            <Heart size={16} fill={(savedPropertyIds || []).includes(listing.id) ? 'white' : 'none'} color={(savedPropertyIds || []).includes(listing.id) ? 'white' : '#475569'} />
+                          </button>
+                          {listing.verified && (
+                            <span className="badge badge-verified" style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', textTransform: 'none', borderRadius: '4px', fontSize: '0.7rem' }}>
+                              <ShieldCheck size={12} /> Verified Listing
+                            </span>
+                          )}
+                          <span className="badge badge-price">৳{priceVal.toLocaleString()} BDT/mo</span>
+                        </div>
+
+                        <div className="listing-info">
+                          <div className="listing-title-row">
+                            <h3 className="listing-title">{listing.title || 'Property Listing'}</h3>
+                            {ratingInfo.hasReviews ? (
+                              <div className="listing-rating" title={`${ratingInfo.formattedAvg} rating out of ${ratingInfo.count} reviews`}>
+                                <Star size={14} fill="var(--warning)" color="var(--warning)" />
+                                <span>{ratingInfo.formattedAvg}</span>
+                                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 'normal' }}>({ratingInfo.count})</span>
+                              </div>
+                            ) : (
+                              <span style={{ background: '#f1f5f9', color: '#475569', fontSize: '0.72rem', padding: '0.2rem 0.55rem', borderRadius: '4px', fontWeight: '600' }}>
+                                No reviews yet
+                              </span>
+                            )}
                           </div>
-                        </div>
-                        
-                        <div className="listing-location">
-                          <MapPin size={12} style={{ color: 'var(--primary)' }} />
-                          {listing.location.includes('BUBT') ? 'BUBT Campus (0.4 miles)' : listing.location}
-                        </div>
-                        
-                        <div className="listing-facilities">
-                          {listing.facilities.map((f, i) => (
-                            <span key={i} className="facility-tag">{f}</span>
-                          ))}
-                        </div>
+                          
+                          <div className="listing-location">
+                            <MapPin size={12} style={{ color: 'var(--primary)' }} />
+                            {displayLoc}
+                          </div>
+                          
+                          <div className="listing-facilities">
+                            {facilitiesList.map((f, i) => (
+                              <span key={i} className="facility-tag">{f}</span>
+                            ))}
+                          </div>
 
-                        <button className="btn-card-action" onClick={() => setSelectedListing(listing)}>
-                          View Details
-                        </button>
+                          <button className="btn-card-action" onClick={() => setSelectedListing(listing)}>
+                            View Details
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
-              {/* Pagination */}
-              <div className="pagination">
-                <button className="pagination-item"><ChevronLeft size={16} /></button>
-                <button className="pagination-item active">1</button>
-                <button className="pagination-item">2</button>
-                <button className="pagination-item">3</button>
-                <span style={{ color: 'var(--text-light)', margin: '0 0.25rem' }}>...</span>
-                <button className="pagination-item">12</button>
-                <button className="pagination-item"><ChevronRight size={16} /></button>
-              </div>
+              {/* Dynamic Working Pagination */}
+              {filteredListings.length > 0 && (
+                <div className="pagination" style={{ marginTop: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
+                  <button 
+                    className="pagination-item" 
+                    disabled={currentPageNum === 1}
+                    style={{ opacity: currentPageNum === 1 ? 0.4 : 1, cursor: currentPageNum === 1 ? 'not-allowed' : 'pointer' }}
+                    onClick={() => {
+                      if (currentPageNum > 1) {
+                        setCurrentPageNum(prev => prev - 1);
+                        window.scrollTo({ top: 150, behavior: 'smooth' });
+                      }
+                    }}
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+
+                  {Array.from({ length: Math.max(1, Math.ceil(filteredListings.length / ITEMS_PER_PAGE)) }, (_, i) => i + 1).map(page => (
+                    <button
+                      key={page}
+                      className={`pagination-item ${currentPageNum === page ? 'active' : ''}`}
+                      onClick={() => {
+                        setCurrentPageNum(page);
+                        window.scrollTo({ top: 150, behavior: 'smooth' });
+                      }}
+                    >
+                      {page}
+                    </button>
+                  ))}
+
+                  <button 
+                    className="pagination-item" 
+                    disabled={currentPageNum === Math.max(1, Math.ceil(filteredListings.length / ITEMS_PER_PAGE))}
+                    style={{ opacity: currentPageNum === Math.max(1, Math.ceil(filteredListings.length / ITEMS_PER_PAGE)) ? 0.4 : 1, cursor: currentPageNum === Math.max(1, Math.ceil(filteredListings.length / ITEMS_PER_PAGE)) ? 'not-allowed' : 'pointer' }}
+                    onClick={() => {
+                      const total = Math.max(1, Math.ceil(filteredListings.length / ITEMS_PER_PAGE));
+                      if (currentPageNum < total) {
+                        setCurrentPageNum(prev => prev + 1);
+                        window.scrollTo({ top: 150, behavior: 'smooth' });
+                      }
+                    }}
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              )}
             </section>
           </div>
         </div>
@@ -364,7 +464,7 @@ function Listings({ listings, selectedListing, setSelectedListing, onStartChat, 
 
                 <div className="detail-price-box">
                   <div className="detail-price-lbl">STARTING FROM</div>
-                  <div className="detail-price-val">${selectedListing.price}/mo</div>
+                  <div className="detail-price-val">৳{selectedListing.price?.toLocaleString()} BDT/mo</div>
                 </div>
               </div>
 
@@ -413,54 +513,61 @@ function Listings({ listings, selectedListing, setSelectedListing, onStartChat, 
                     <span>Full Kitchen</span>
                   </div>
                 </div>
-              </div>
+                          {/* Dynamic Real Reviews list */}
+              {(() => {
+                const modalRatingInfo = getListingRating(selectedListing, reviews);
+                const listingReviews = getListingReviews(selectedListing, reviews);
 
-              {/* Reviews list */}
-              <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: '1.5rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                  <h3 style={{ fontSize: '1.2rem' }}>Reviews & Ratings ({selectedListing.reviews.length})</h3>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontWeight: '700' }}>
-                    <Star size={18} fill="var(--warning)" color="var(--warning)" />
-                    {selectedListing.landlord.rating} (124 reviews)
-                  </div>
-                </div>
-
-                <div className="reviews-list">
-                  {selectedListing.reviews.length === 0 ? (
-                    <div className="glass-panel review-item" style={{ background: 'var(--bg-deep)', border: '1px solid var(--border-light)' }}>
-                      <div className="review-header">
-                        <span className="review-author">Ashik</span>
-                        <span className="review-date">Oct 2023</span>
+                return (
+                  <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: '1.5rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      <h3 style={{ fontSize: '1.2rem', fontWeight: '800' }}>
+                        Reviews & Ratings ({modalRatingInfo.count})
+                      </h3>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '700' }}>
+                        {modalRatingInfo.hasReviews ? (
+                          <>
+                            <Star size={18} fill="var(--warning)" color="var(--warning)" />
+                            <span>{modalRatingInfo.displayText}</span>
+                          </>
+                        ) : (
+                          <span style={{ background: '#f1f5f9', color: '#475569', fontSize: '0.8rem', padding: '0.3rem 0.75rem', borderRadius: '50px', fontWeight: '600' }}>
+                            No reviews yet
+                          </span>
+                        )}
                       </div>
-                      <div className="review-stars">
-                        {[...Array(5)].map((_, i) => <Star key={i} size={14} fill="var(--warning)" color="var(--warning)" />)}
-                      </div>
-                      <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem', fontSize: '0.95rem' }}>
-                        Amazing student flat, extremely close to BUBT! Utilities are fully bundled and fiber wifi is super fast. Highly recommended.
-                      </p>
                     </div>
-                  ) : (
-                    selectedListing.reviews.map((rev, i) => (
-                      <div key={i} className="glass-panel review-item" style={{ background: 'var(--bg-deep)', border: '1px solid var(--border-light)', padding: '1.25rem' }}>
-                        <div className="review-header">
-                          <span className="review-author">{rev.author}</span>
-                          <span className="review-date">{rev.date}</span>
+
+                    <div className="reviews-list">
+                      {listingReviews.length === 0 ? (
+                        <div style={{ padding: '1.5rem', textAlign: 'center', background: '#f8fafc', border: '1px solid var(--border-light)', borderRadius: '10px', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                          💬 No student reviews yet for this listing. Be the first to leave a review below!
                         </div>
-                        <div className="review-stars">
-                          {[...Array(5)].map((_, idx) => (
-                            <Star 
-                              key={idx} 
-                              size={14} 
-                              fill={idx < rev.rating ? "var(--warning)" : "none"} 
-                              color={idx < rev.rating ? "var(--warning)" : "var(--text-light)"} 
-                            />
-                          ))}
-                        </div>
-                        <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem', fontSize: '0.95rem' }}>{rev.comment}</p>
-                      </div>
-                    ))
-                  )}
-                </div>
+                      ) : (
+                        listingReviews.map((rev, i) => (
+                          <div key={rev.id || i} className="glass-panel review-item" style={{ background: '#ffffff', border: '1px solid var(--border-light)', padding: '1.25rem', borderRadius: '10px', marginBottom: '0.75rem' }}>
+                            <div className="review-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                              <span className="review-author" style={{ fontWeight: '800' }}>{rev.author || 'Verified Student'}</span>
+                              <span className="review-date" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{rev.date}</span>
+                            </div>
+                            <div className="review-stars" style={{ display: 'flex', gap: '0.15rem' }}>
+                              {[...Array(5)].map((_, idx) => (
+                                <Star 
+                                  key={idx} 
+                                  size={15} 
+                                  fill={idx < (Number(rev.rating) || 5) ? "var(--warning)" : "none"} 
+                                  color={idx < (Number(rev.rating) || 5) ? "var(--warning)" : "var(--border-light)"} 
+                                />
+                              ))}
+                            </div>
+                            <p style={{ color: 'var(--text-main)', marginTop: '0.5rem', fontSize: '0.9rem', lineHeight: '1.5' }}>{rev.comment}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
                 {/* Submit review */}
                 <form onSubmit={handleReviewSubmit} style={{ margin: '1.5rem 0', display: 'flex', flexDirection: 'column', gap: '1rem', borderTop: '1px solid var(--border-light)', paddingTop: '1.5rem' }}>
@@ -517,11 +624,11 @@ function Listings({ listings, selectedListing, setSelectedListing, onStartChat, 
                     style={{ width: '3.5rem', height: '3.5rem' }} 
                   />
                   <div>
-                    <h4 style={{ fontSize: '1.05rem', fontWeight: '700' }}>{selectedListing.landlord.name}</h4>
+                    <h4 style={{ fontSize: '1.05rem', fontWeight: '700' }}>{selectedListing.landlord?.name || selectedListing.landlord_name || 'Verified Landlord'}</h4>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Verified Landlord Since 2019</p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.8rem', fontWeight: '600', marginTop: '0.15rem' }}>
                       <Star size={12} fill="var(--warning)" color="var(--warning)" />
-                      {selectedListing.landlord.rating} • 15 Listings
+                      {selectedListing.landlord?.rating || selectedListing.rating || 4.8} • 15 Listings
                     </div>
                   </div>
                 </div>
@@ -531,8 +638,12 @@ function Listings({ listings, selectedListing, setSelectedListing, onStartChat, 
                     className="btn-card-action" 
                     style={{ borderRadius: '6px' }}
                     onClick={() => {
-                      const messageText = `Hi ${selectedListing.landlord.name}, I am interested in booking a viewing for "${selectedListing.title}". Can we schedule one?`;
-                      onStartChat(selectedListing.landlord.name, messageText);
+                      const name = selectedListing.landlord?.name || selectedListing.landlord_name || 'Landlord';
+                      const lEmail = selectedListing.landlord?.email || selectedListing.landlord_email || '';
+                      const lId = selectedListing.landlord?.id || selectedListing.landlord_id || '';
+                      if (onRecordBooking && selectedListing?.id) onRecordBooking(selectedListing.id);
+                      const messageText = `Hi ${name}, I am interested in booking a viewing for "${selectedListing.title}". Can we schedule one?`;
+                      onStartChat(name, messageText, selectedListing.title, selectedListing.landlord?.avatar || null, lEmail, lId, selectedListing);
                     }}
                   >
                     Book Viewing
@@ -541,8 +652,11 @@ function Listings({ listings, selectedListing, setSelectedListing, onStartChat, 
                     className="btn-card-secondary" 
                     style={{ color: 'white', background: '#0f766e', border: 'none', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', padding: '0.6rem' }}
                     onClick={() => {
-                      const messageText = `Hi ${selectedListing.landlord.name}, I am interested in your property "${selectedListing.title}" listed in ${selectedListing.location}. Is it still available?`;
-                      onStartChat(selectedListing.landlord.name, messageText);
+                      const name = selectedListing.landlord?.name || selectedListing.landlord_name || 'Landlord';
+                      const lEmail = selectedListing.landlord?.email || selectedListing.landlord_email || '';
+                      const lId = selectedListing.landlord?.id || selectedListing.landlord_id || '';
+                      const messageText = `Hi ${name}, I am interested in your property "${selectedListing.title}" listed in ${selectedListing.location}. Is it still available?`;
+                      onStartChat(name, messageText, selectedListing.title, selectedListing.landlord?.avatar || null, lEmail, lId, selectedListing);
                     }}
                   >
                     <MessageSquare size={16} /> Contact Landlord

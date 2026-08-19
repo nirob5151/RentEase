@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { dbService } from '../database/supabaseClient';
+import { checkProfileCompleteness, getAvatarUrl, compressImage } from '../utils/profileCompleteness';
+import { downloadPaymentReceipt } from '../utils/receiptGenerator';
 import { 
   Bell, Heart, MapPin, Search, Users, ArrowRight, MessageSquare, 
   FileText, Calendar, CreditCard, Star, ShieldCheck, UserCheck, 
   HelpCircle, Settings, CheckCircle, Download, X, Plus, AlertCircle, 
-  Trash2, Lock, ShieldAlert, Zap, FileDown, Printer 
+  Trash2, Lock, ShieldAlert, Zap, FileDown, Printer, Clock, Eye, Camera 
 } from 'lucide-react';
 
 export default function StudentDashboard({ 
@@ -13,19 +16,45 @@ export default function StudentDashboard({
   onStartChat, 
   onSaveSettings,
   payments = [],
-  onAddPayment
+  onAddPayment,
+  savedPropertyIds = [],
+  userBookedPropertyIds = [],
+  listings = [],
+  chats = [],
+  notifications = []
 }) {
   
-  // --- MOCK STATE SEEDS ---
+  // Real valid metrics synchronized with actual stored properties
+  const validSavedListings = (listings || []).filter(l => (savedPropertyIds || []).includes(l.id));
+  const realSavedCount = validSavedListings.length;
 
-  // 1. Saved Properties
-  const [savedCount] = useState(0);
+  const validBookedListings = (listings || []).filter(l => (userBookedPropertyIds || []).includes(l.id));
 
   // 2. Active Bookings
   const [bookings, setBookings] = useState(() => {
     const saved = localStorage.getItem('rentease_student_bookings');
     return saved ? JSON.parse(saved) : [];
   });
+
+  const displayBookings = [...bookings];
+  (userBookedPropertyIds || []).forEach(bookedId => {
+    const listingMatch = (listings || []).find(l => l.id === bookedId);
+    if (listingMatch && !displayBookings.some(b => b.propertyId === bookedId || b.propertyTitle === listingMatch.title)) {
+      displayBookings.push({
+        id: `b_user_${bookedId}`,
+        propertyId: bookedId,
+        propertyTitle: listingMatch.title,
+        landlordName: listingMatch.landlord?.name || listingMatch.landlord_name || 'Landlord',
+        moveInDate: 'Next Month 1st',
+        deposit: listingMatch.price ? Math.round(listingMatch.price * 1.5) : 10000,
+        status: 'Pending Confirmation'
+      });
+    }
+  });
+
+  const realBookingsCount = displayBookings.length;
+  const realUnreadMessagesCount = (chats || []).reduce((acc, c) => acc + (Number(c.unread) || 0), 0);
+  const realNotificationsCount = (notifications || []).length;
 
   // 3. Roommate Matches
   const [matches] = useState(() => {
@@ -45,20 +74,195 @@ export default function StudentDashboard({
     return saved ? JSON.parse(saved) : [];
   });
 
+  const displayPayments = (payments && payments.length > 0) ? payments : localPayments;
+
+  // Real-time Database Initializer
+  useEffect(() => {
+    // 1. Fetch Bookings from Database Service
+    dbService.getBookings().then(fetchedBookings => {
+      if (Array.isArray(fetchedBookings) && fetchedBookings.length > 0) {
+        const formatted = fetchedBookings.map(b => ({
+          id: b.id,
+          propertyId: b.property_id || b.propertyId,
+          propertyTitle: b.property_title || b.propertyTitle || 'Student Housing',
+          landlordName: b.landlord_name || b.landlordName || 'Landlord Owner',
+          moveInDate: b.move_in_date || b.moveInDate || b.date || 'Next Month 1st',
+          deposit: b.deposit || (b.price ? Math.round(b.price * 1.5) : 10000),
+          status: b.status || 'Pending Confirmation'
+        }));
+        setBookings(formatted);
+      }
+    });
+
+    // 2. Fetch Payments from Database Service
+    dbService.getPayments().then(fetchedPayments => {
+      if (Array.isArray(fetchedPayments) && fetchedPayments.length > 0) {
+        const formatted = fetchedPayments.map(p => ({
+          id: p.id,
+          receiptId: p.receipt_id || p.receiptId || 'REC-' + p.id,
+          receiptNo: p.receipt_id || p.receiptId || 'REC-' + p.id,
+          tenantName: p.tenant_name || p.tenantName || currentUser?.name || 'Student Tenant',
+          propertyTitle: p.property_title || p.propertyTitle || 'Mirpur House',
+          property: p.property_title || p.propertyTitle || 'Mirpur House',
+          amount: p.amount || 6000,
+          month: p.month || 'August 2026',
+          status: p.status === 'Paid' ? 'Paid' : (p.status || 'Pending'),
+          date: p.date || new Date().toISOString().split('T')[0],
+          gateway: p.gateway || 'bKash',
+          accountNum: p.accountNum || p.account_num || '+880 1711-XXXXXX',
+          depositStatus: 'Refundable'
+        }));
+        setLocalPayments(formatted);
+      }
+    });
+    // 3. Fetch Reviews from Database Service
+    dbService.getReviews().then(fetchedReviews => {
+      if (Array.isArray(fetchedReviews) && fetchedReviews.length > 0) {
+        setMyReviews(fetchedReviews);
+      }
+    });
+  }, [currentUser]);
+
   // 6. Profile Editable Form States
   const [fullName, setFullName] = useState(currentUser?.name || 'Anas Ahmed');
   const [studentId, setStudentId] = useState(currentUser?.studentId || '22235103467');
   const [university, setUniversity] = useState(currentUser?.university || 'Bangladesh University of Business and Technology (BUBT)');
   const [department, setDepartment] = useState(currentUser?.department || 'Computer Science & Engineering (CSE)');
-  const [academicYear, setAcademicYear] = useState('Junior Year (Intake 51/8)');
+  const [academicYear, setAcademicYear] = useState(currentUser?.academicYear || currentUser?.academic_year || currentUser?.year || 'Junior Year (Intake 51/8)');
   const [email, setEmail] = useState(currentUser?.email || 'anas@cse.bubt.edu.bd');
   const [phone, setPhone] = useState(currentUser?.phone || '+880 1711-223344');
-  const [gender, setGender] = useState('Male');
-  const [dob, setDob] = useState('2003-05-14');
-  const [emergencyContact, setEmergencyContact] = useState('+880 1819-000000');
+  const [gender, setGender] = useState(currentUser?.gender || 'Male');
+  const [dob, setDob] = useState(currentUser?.dob || currentUser?.date_of_birth || '2003-05-14');
+  const [emergencyContact, setEmergencyContact] = useState(currentUser?.emergencyContact || currentUser?.emergency_contact || '+880 1819-000000');
   const [enable2FA, setEnable2FA] = useState(false);
-  const [isIdVerified, setIsIdVerified] = useState(true);
   const [profileSuccess, setProfileSuccess] = useState(false);
+
+  // Profile Picture Upload State & Handler
+  const [profilePicture, setProfilePicture] = useState(currentUser?.avatar || currentUser?.avatar_url || currentUser?.profile_picture || '');
+  const [avatarUploading, setAvatarUploading] = useState(false);
+
+  const handleAvatarUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Frontend File Format Validation (JPG, PNG, WEBP)
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    if (!validTypes.includes(file.type.toLowerCase())) {
+      alert('❌ Invalid file format! Only JPG, PNG, and WEBP image files are allowed for your profile picture.');
+      return;
+    }
+
+    // Frontend File Size Validation (Max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      alert('❌ File size exceeds 2 MB limit! Please upload a smaller profile picture.');
+      return;
+    }
+
+    setAvatarUploading(true);
+    try {
+      // Compress and resize image to ~30KB JPEG to prevent localStorage quota crash
+      const compressedDataUrl = await compressImage(file, 300, 300, 0.85);
+      setProfilePicture(compressedDataUrl);
+
+      const res = await dbService.updateProfilePicture(currentUser?.email || email, compressedDataUrl);
+      if (res && res.error) {
+        alert(`❌ ${res.message}`);
+        setAvatarUploading(false);
+        return;
+      }
+
+      const updatedAvatar = res.avatarUrl || compressedDataUrl;
+      setAvatarUploading(false);
+      setProfilePicture(updatedAvatar);
+
+      if (onSaveSettings) {
+        onSaveSettings({
+          ...currentUser,
+          avatar: updatedAvatar,
+          avatar_url: updatedAvatar,
+          profile_picture: updatedAvatar
+        });
+      }
+
+      alert('🎉 Profile picture updated successfully!');
+    } catch (err) {
+      console.warn('Avatar compression error:', err);
+      setAvatarUploading(false);
+      alert('❌ Failed to process profile picture. Please select a valid image file.');
+    }
+  };
+
+  // Dynamic Profile Completeness Checker
+  const currentStudentProfile = {
+    fullName,
+    name: fullName,
+    studentId,
+    university,
+    department,
+    academicYear,
+    academic_year: academicYear,
+    year: academicYear,
+    email,
+    phone,
+    gender,
+    dob,
+    date_of_birth: dob,
+    emergencyContact,
+    emergency_contact: emergencyContact
+  };
+
+  const profileCompleteness = checkProfileCompleteness(currentStudentProfile);
+
+  // Live ID Verification Record State
+  const [idVerRecord, setIdVerRecord] = useState(null);
+  const [idUploading, setIdUploading] = useState(false);
+  const [showNotifDropdown, setShowNotifDropdown] = useState(false);
+
+  useEffect(() => {
+    if (currentUser?.email) {
+      dbService.getIdVerificationStatus(currentUser.email).then(rec => {
+        if (rec) setIdVerRecord(rec);
+      });
+    }
+  }, [currentUser?.email]);
+
+  const handleIdUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!profileCompleteness.isComplete) {
+      alert(`⚠️ Please complete your profile before submitting ID verification.\n\nMissing required fields:\n• ${profileCompleteness.missingFields.join('\n• ')}`);
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File size exceeds 10 MB limit. Please select a smaller document (image or PDF).');
+      return;
+    }
+
+    setIdUploading(true);
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const fileUrl = reader.result;
+      const response = await dbService.submitIdVerification(
+        currentUser?.email || email,
+        fullName || currentUser?.name || 'Student',
+        fileUrl,
+        currentStudentProfile
+      );
+
+      if (response && response.error) {
+        alert(`❌ ${response.message}`);
+        setIdUploading(false);
+        return;
+      }
+
+      setIdVerRecord(response);
+      setIdUploading(false);
+      alert('🎉 Student ID document submitted! Status: Pending Review by Admin.');
+    };
+    reader.readAsDataURL(file);
+  };
 
   // 7. Pay Rent Online Modal
   const [showPayModal, setShowPayModal] = useState(false);
@@ -68,9 +272,24 @@ export default function StudentDashboard({
 
   // 8. Add Review Modal
   const [showAddReviewModal, setShowAddReviewModal] = useState(false);
-  const [newReviewTarget, setNewReviewTarget] = useState('Mirpur House');
+  const [reviewCategory, setReviewCategory] = useState('Property'); // 'Property' | 'Landlord' | 'Roommate'
+  const [newReviewTarget, setNewReviewTarget] = useState('');
   const [newReviewRating, setNewReviewRating] = useState(5);
   const [newReviewComment, setNewReviewComment] = useState('');
+
+  // Target Option Pools for Review Modal
+  const bookedPropertyListings = (userBookedPropertyIds || []).map(id => {
+    return (listings || []).find(l => l.id === id);
+  }).filter(Boolean);
+
+  const availablePropertyOptions = bookedPropertyListings.length > 0
+    ? bookedPropertyListings
+    : (validSavedListings.length > 0 ? validSavedListings : listings);
+
+  const landlordOptions = ['Mehadi Hasan (Landlord)', 'Abdur Rahman (Landlord)', 'Sumon Hossain (Landlord)', 'Nirob Ahmed (Landlord)'];
+  const roommateOptions = (matches || []).length > 0
+    ? matches.map(m => `${m.name} (Roommate)`)
+    : ['Anas Ahmed (Roommate)', 'Sumon Hossain (Roommate)', 'Mehadi Hasan (Roommate)', 'Ashikur Rahman (Roommate)'];
 
   // 9. Selected Receipt for Official PDF Viewer Modal
   const [selectedReceipt, setSelectedReceipt] = useState(null);
@@ -88,6 +307,15 @@ export default function StudentDashboard({
         studentId
       });
     }
+    dbService.saveUser({
+      id: currentUser?.id,
+      name: fullName,
+      email,
+      phone,
+      university,
+      department,
+      studentId
+    });
     setProfileSuccess(true);
     setTimeout(() => setProfileSuccess(false), 3000);
   };
@@ -106,12 +334,15 @@ export default function StudentDashboard({
       property: 'Mirpur House',
       amount: parseInt(payAmount),
       month: 'August 2026',
-      status: 'Pending Approval (Sent to Landlord)',
+      status: 'Pending',
       date: new Date().toISOString().split('T')[0],
       gateway: payGateway,
       accountNum: payAccountNum,
       depositStatus: 'Refundable'
     };
+
+    // Save to Database Service & Supabase PostgreSQL
+    dbService.addPayment(newTxn);
 
     if (onAddPayment) {
       onAddPayment(newTxn);
@@ -127,22 +358,28 @@ export default function StudentDashboard({
     e.preventDefault();
     if (!newReviewComment) return;
 
+    const targetName = newReviewTarget || (reviewCategory === 'Property' ? (availablePropertyOptions[0]?.title || 'Mirpur House') : reviewCategory === 'Landlord' ? landlordOptions[0] : roommateOptions[0]);
+
     const newRev = {
-      id: Date.now(),
-      target: newReviewTarget,
+      id: 'rev_' + Date.now(),
+      target: `${targetName} [${reviewCategory}]`,
       rating: parseInt(newReviewRating),
       comment: newReviewComment,
+      author: fullName || currentUser?.name || 'Student',
       date: new Date().toISOString().split('T')[0]
     };
 
+    dbService.saveReview(newRev);
     setMyReviews(prev => [newRev, ...prev]);
     setShowAddReviewModal(false);
     setNewReviewComment('');
-    alert('Your review has been published!');
+    setNewReviewTarget('');
+    alert(`Your review for "${targetName}" has been published and saved to database!`);
   };
 
   const cancelBooking = (id, title) => {
     if (window.confirm(`Are you sure you want to cancel your booking request for "${title}"?`)) {
+      dbService.updateBookingStatus(id, 'Cancelled');
       setBookings(prev => prev.filter(b => b.id !== id));
       alert(`Booking request for "${title}" cancelled.`);
     }
@@ -162,16 +399,53 @@ export default function StudentDashboard({
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <span className="badge-student-verified" style={{ background: '#d1fae5', color: '#065f46', fontWeight: 'bold', padding: '0.4rem 0.85rem', borderRadius: '50px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <ShieldCheck size={16} /> Student Verified ID
-          </span>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          {(!idVerRecord || idVerRecord.verification_status === 'verified' || currentUser?.is_verified) && (
+            <span className="badge-student-verified" style={{ background: '#d1fae5', color: '#065f46', fontWeight: 'bold', padding: '0.4rem 0.85rem', borderRadius: '50px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              <ShieldCheck size={16} /> ✓ ID Verified
+            </span>
+          )}
+
+          {idVerRecord?.verification_status === 'pending' && (
+            <span className="badge-student-verified" style={{ background: '#fef3c7', color: '#b45309', fontWeight: 'bold', padding: '0.4rem 0.85rem', borderRadius: '50px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              <Clock size={16} /> 🟡 Pending Review
+            </span>
+          )}
+
+          {idVerRecord?.verification_status === 'rejected' && (
+            <span className="badge-student-verified" style={{ background: '#fee2e2', color: 'var(--danger)', fontWeight: 'bold', padding: '0.4rem 0.85rem', borderRadius: '50px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              <AlertCircle size={16} /> 🔴 Verification Rejected
+            </span>
+          )}
         </div>
       </div>
 
       {/* SUB-VIEW 1: MAIN DASHBOARD OVERVIEW */}
       {activeTab === 'dashboard' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+
+          {/* Profile Incomplete Banner Alert */}
+          {!profileCompleteness.isComplete && (
+            <div style={{ padding: '1rem 1.25rem', background: '#fff7ed', border: '1px solid #ffedd5', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <strong style={{ fontSize: '0.9rem', color: '#9a3412', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <AlertCircle size={18} style={{ color: '#ea580c' }} /> Complete your profile before submitting ID verification
+                </strong>
+                <p style={{ fontSize: '0.82rem', color: '#c2410c', marginTop: '0.2rem' }}>
+                  Missing required profile fields: <strong>{profileCompleteness.missingFields.join(', ')}</strong>
+                </p>
+              </div>
+
+              <button 
+                type="button" 
+                className="btn-filter-apply" 
+                style={{ background: '#ea580c', fontSize: '0.8rem', padding: '0.45rem 1rem' }} 
+                onClick={() => onNavigate('student_profile')}
+              >
+                Complete Profile Now &rarr;
+              </button>
+            </div>
+          )}
 
           {/* 6 Key Overview Widgets */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1.25rem' }}>
@@ -182,7 +456,7 @@ export default function StudentDashboard({
               </div>
               <div>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '600' }}>Saved Properties</p>
-                <h3 style={{ fontSize: '1.35rem', fontWeight: '800' }}>{savedCount}</h3>
+                <h3 style={{ fontSize: '1.35rem', fontWeight: '800' }}>{realSavedCount}</h3>
               </div>
             </div>
 
@@ -192,7 +466,7 @@ export default function StudentDashboard({
               </div>
               <div>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '600' }}>Active Bookings</p>
-                <h3 style={{ fontSize: '1.35rem', fontWeight: '800' }}>{bookings.length}</h3>
+                <h3 style={{ fontSize: '1.35rem', fontWeight: '800' }}>{realBookingsCount || bookings.length}</h3>
               </div>
             </div>
 
@@ -212,7 +486,7 @@ export default function StudentDashboard({
               </div>
               <div>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '600' }}>Unread Messages</p>
-                <h3 style={{ fontSize: '1.35rem', fontWeight: '800' }}>2</h3>
+                <h3 style={{ fontSize: '1.35rem', fontWeight: '800' }}>{realUnreadMessagesCount}</h3>
               </div>
             </div>
 
@@ -232,7 +506,7 @@ export default function StudentDashboard({
               </div>
               <div>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '600' }}>Notifications</p>
-                <h3 style={{ fontSize: '1.35rem', fontWeight: '800' }}>4</h3>
+                <h3 style={{ fontSize: '1.35rem', fontWeight: '800' }}>{realNotificationsCount}</h3>
               </div>
             </div>
 
@@ -306,15 +580,68 @@ export default function StudentDashboard({
 
           <form onSubmit={handleProfileSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '720px' }}>
             
-            {/* Avatar block */}
-            <div style={{ display: 'flex', gap: '1.25rem', alignItems: 'center' }}>
-              <img src={currentUser?.avatar || "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80"} alt="avatar" style={{ width: '80px', height: '80px', borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--primary-light)' }} />
+            {/* Interactive Avatar Upload Block */}
+            <div style={{ display: 'flex', gap: '1.25rem', alignItems: 'center', background: '#f8fafc', padding: '1.25rem', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
+              <div style={{ position: 'relative' }}>
+                <img 
+                  src={profilePicture || getAvatarUrl({ name: fullName, avatar: currentUser?.avatar })} 
+                  alt="Student Avatar" 
+                  style={{ width: '85px', height: '85px', borderRadius: '50%', objectFit: 'cover', border: '3px solid var(--primary)' }} 
+                  onError={(e) => {
+                    e.target.onerror = null;
+                    e.target.src = getAvatarUrl({ name: fullName });
+                  }}
+                />
+                <label 
+                  style={{ 
+                    position: 'absolute', bottom: 0, right: 0, 
+                    background: 'var(--primary)', color: 'white', 
+                    borderRadius: '50%', width: '28px', height: '28px', 
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                    cursor: avatarUploading ? 'wait' : 'pointer', boxShadow: 'var(--shadow-sm)' 
+                  }}
+                  title="Upload profile picture"
+                >
+                  <Camera size={15} />
+                  <input 
+                    type="file" 
+                    accept="image/jpeg,image/png,image/webp" 
+                    onChange={handleAvatarUpload} 
+                    style={{ display: 'none' }} 
+                    disabled={avatarUploading}
+                  />
+                </label>
+              </div>
+
               <div>
-                <h4 style={{ fontWeight: '800' }}>{fullName}</h4>
+                <h4 style={{ fontWeight: '800', fontSize: '1.05rem' }}>{fullName}</h4>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{university}</p>
                 <span className="badge-pill-light" style={{ background: '#dbeafe', color: '#1e40af', fontSize: '0.75rem', fontWeight: 'bold', marginTop: '0.25rem', display: 'inline-block' }}>
                   Student ID: {studentId}
                 </span>
+
+                <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.65rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <label 
+                    style={{ 
+                      display: 'inline-flex', 
+                      alignItems: 'center', 
+                      gap: '0.45rem', 
+                      background: 'var(--primary)', 
+                      color: 'white',
+                      padding: '0.45rem 0.9rem', 
+                      borderRadius: '8px',
+                      fontSize: '0.8rem', 
+                      fontWeight: '700',
+                      cursor: avatarUploading ? 'wait' : 'pointer',
+                      boxShadow: 'var(--shadow-sm)'
+                    }}
+                  >
+                    <Camera size={15} />
+                    <span>{avatarUploading ? 'Uploading...' : 'Upload Profile Picture'}</span>
+                    <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleAvatarUpload} style={{ display: 'none' }} disabled={avatarUploading} />
+                  </label>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Max 2MB (JPG, PNG, WEBP)</span>
+                </div>
               </div>
             </div>
 
@@ -326,8 +653,21 @@ export default function StudentDashboard({
               </div>
 
               <div className="form-group">
-                <label className="filter-label">Student ID Number</label>
-                <input type="text" className="form-input" value={studentId} onChange={(e) => setStudentId(e.target.value)} required />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                  <label className="filter-label" style={{ margin: 0 }}>Student ID Number</label>
+                  <span style={{ fontSize: '0.72rem', color: '#64748b', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontWeight: '600' }}>
+                    <Lock size={12} /> Permanent / Cannot be changed
+                  </span>
+                </div>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  value={studentId} 
+                  disabled 
+                  readOnly 
+                  style={{ background: '#f1f5f9', cursor: 'not-allowed', color: '#475569', fontWeight: '600' }} 
+                  title="Student ID Number is locked and cannot be modified."
+                />
               </div>
 
               <div className="form-group">
@@ -346,8 +686,21 @@ export default function StudentDashboard({
               </div>
 
               <div className="form-group">
-                <label className="filter-label">Email Address</label>
-                <input type="email" className="form-input" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                  <label className="filter-label" style={{ margin: 0 }}>Email Address</label>
+                  <span style={{ fontSize: '0.72rem', color: '#64748b', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontWeight: '600' }}>
+                    <Lock size={12} /> Permanent / Verified Email
+                  </span>
+                </div>
+                <input 
+                  type="email" 
+                  className="form-input" 
+                  value={email} 
+                  disabled 
+                  readOnly 
+                  style={{ background: '#f1f5f9', cursor: 'not-allowed', color: '#475569', fontWeight: '600' }} 
+                  title="Email address is locked and cannot be modified."
+                />
               </div>
 
               <div className="form-group">
@@ -390,15 +743,86 @@ export default function StudentDashboard({
                 </label>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', background: '#f8fafc', border: '1px solid var(--border-light)', borderRadius: '8px' }}>
-                <div>
-                  <span style={{ fontWeight: '700', fontSize: '0.85rem' }}>University Student ID Scan Status</span>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Verified against BUBT student registry database.</p>
+              {/* Dynamic Student ID Verification Section */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '1.25rem', background: '#f8fafc', border: '1px solid var(--border-light)', borderRadius: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div>
+                    <span style={{ fontWeight: '700', fontSize: '0.9rem', color: 'var(--text-main)' }}>University Student ID Scan Status</span>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Upload student card or NID (PDF/Image up to 10MB) for admin verification.</p>
+                  </div>
+
+                  {(!idVerRecord || idVerRecord.verification_status === 'verified' || currentUser?.is_verified) && (
+                    <span className="admin-badge-pill" style={{ background: '#d1fae5', color: '#065f46', fontWeight: '700', padding: '0.4rem 0.85rem', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <CheckCircle size={15} /> ✓ ID Verified
+                    </span>
+                  )}
+
+                  {idVerRecord?.verification_status === 'pending' && (
+                    <span className="admin-badge-pill" style={{ background: '#fef3c7', color: '#b45309', fontWeight: '700', padding: '0.4rem 0.85rem', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <Clock size={15} /> 🟡 Pending Review
+                    </span>
+                  )}
+
+                  {idVerRecord?.verification_status === 'rejected' && (
+                    <span className="admin-badge-pill" style={{ background: '#fee2e2', color: 'var(--danger)', fontWeight: '700', padding: '0.4rem 0.85rem', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <AlertCircle size={15} /> 🔴 Rejected
+                    </span>
+                  )}
                 </div>
 
-                <button type="button" className="btn-filter-apply" style={{ background: 'var(--secondary)', fontSize: '0.8rem' }} onClick={() => alert('Student ID card scan verified successfully.')}>
-                  {isIdVerified ? '✓ ID Verified' : 'Upload ID Card'}
-                </button>
+                {/* Status-specific alert message */}
+                {idVerRecord?.verification_status === 'pending' && (
+                  <div style={{ padding: '0.75rem 1rem', background: '#fffbeb', border: '1px solid #fef3c7', borderRadius: '6px', fontSize: '0.82rem', color: '#b45309' }}>
+                    ⏳ Your ID document is currently under review by RentEase Admin. You will receive an in-app & email notification once reviewed.
+                  </div>
+                )}
+
+                {idVerRecord?.verification_status === 'rejected' && (
+                  <div style={{ padding: '0.75rem 1rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', fontSize: '0.82rem', color: '#991b1b' }}>
+                    ❌ <strong>Verification Rejected:</strong> {idVerRecord.rejection_reason || 'Document unclear or invalid.'} Please upload a valid document below.
+                  </div>
+                )}
+
+                {/* Upload Input Button OR Profile Incomplete Gate */}
+                {(!idVerRecord || idVerRecord.verification_status === 'rejected') && (
+                  <div style={{ marginTop: '0.5rem' }}>
+                    {!profileCompleteness.isComplete ? (
+                      <div style={{ padding: '1rem 1.25rem', background: '#fff7ed', border: '1px solid #ffedd5', borderRadius: '8px', color: '#c2410c' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                          <AlertCircle size={18} style={{ color: '#ea580c' }} />
+                          <strong style={{ fontSize: '0.9rem', color: '#9a3412' }}>Please complete your profile before submitting ID verification.</strong>
+                        </div>
+                        <p style={{ fontSize: '0.82rem', color: '#c2410c', margin: '0.25rem 0 0.85rem 0' }}>
+                          Missing required profile fields: <strong>{profileCompleteness.missingFields.join(', ')}</strong>
+                        </p>
+                        <button 
+                          type="button" 
+                          className="btn-filter-apply" 
+                          style={{ background: '#ea580c', fontSize: '0.8rem', padding: '0.45rem 1rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }} 
+                          onClick={() => {
+                            if (activeTab !== 'student_profile') {
+                              onNavigate('student_profile');
+                            } else {
+                              const el = document.getElementById('student-profile-form-box');
+                              if (el) el.scrollIntoView({ behavior: 'smooth' });
+                            }
+                          }}
+                        >
+                          Fill Missing Profile Details &rarr;
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <label className="btn-filter-apply" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', cursor: idUploading ? 'wait' : 'pointer', background: 'var(--primary)', fontSize: '0.82rem' }}>
+                          <FileText size={16} />
+                          <span>{idUploading ? 'Uploading Document...' : (idVerRecord?.verification_status === 'rejected' ? 'Re-upload Student ID Document' : 'Upload Student ID / NID Document')}</span>
+                          <input type="file" accept="image/*,application/pdf" onChange={handleIdUpload} style={{ display: 'none' }} disabled={idUploading} />
+                        </label>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '0.75rem' }}>Supports JPG, PNG, WEBP & PDF (Max 10 MB)</span>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -417,37 +841,45 @@ export default function StudentDashboard({
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Track your active rental booking requests, status updates, and confirmations.</p>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            {bookings.map(b => (
-              <div key={b.id} style={{ padding: '1.5rem', border: '1px solid var(--border-light)', borderRadius: '8px', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-                <div>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <h4 style={{ fontWeight: '800', fontSize: '1.05rem' }}>{b.propertyTitle}</h4>
-                    <span className="admin-badge-pill" style={{ 
-                      background: b.status === 'Confirmed' ? '#d1fae5' : '#fef3c7',
-                      color: b.status === 'Confirmed' ? '#065f46' : '#b45309'
-                    }}>
-                      {b.status}
-                    </span>
+          {displayBookings.length === 0 ? (
+            <div style={{ padding: '3rem', textAlign: 'center', background: 'white', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
+              <Calendar size={40} style={{ color: 'var(--text-light)', marginBottom: '0.75rem' }} />
+              <h4 style={{ fontWeight: '700', marginBottom: '0.25rem' }}>No Active Bookings</h4>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>You have not submitted any property booking or viewing requests yet.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {displayBookings.map(b => (
+                <div key={b.id} style={{ padding: '1.5rem', border: '1px solid var(--border-light)', borderRadius: '8px', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                  <div>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <h4 style={{ fontWeight: '800', fontSize: '1.05rem' }}>{b.propertyTitle}</h4>
+                      <span className="admin-badge-pill" style={{ 
+                        background: b.status === 'Confirmed' ? '#d1fae5' : '#fef3c7',
+                        color: b.status === 'Confirmed' ? '#065f46' : '#b45309'
+                      }}>
+                        {b.status}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Landlord Owner: <strong>{b.landlordName}</strong></p>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Move-in Date: {b.moveInDate} • Deposit: <strong>{b.deposit} BDT</strong></p>
                   </div>
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Landlord Owner: <strong>{b.landlordName}</strong></p>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Move-in Date: {b.moveInDate} • Deposit: <strong>{b.deposit} BDT</strong></p>
-                </div>
 
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button className="btn-card-secondary" style={{ background: 'white', border: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem' }} onClick={() => alert(`Downloading official booking confirmation PDF for ${b.propertyTitle}`)}>
-                    <FileDown size={14} /> Confirmation PDF
-                  </button>
-                  
-                  {b.status !== 'Confirmed' && (
-                    <button className="btn-card-secondary" style={{ border: '1px solid var(--danger)', color: 'var(--danger)', fontSize: '0.8rem' }} onClick={() => cancelBooking(b.id, b.propertyTitle)}>
-                      Cancel Booking
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button className="btn-card-secondary" style={{ background: 'white', border: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem' }} onClick={() => alert(`Downloading official booking confirmation PDF for ${b.propertyTitle}`)}>
+                      <FileDown size={14} /> Confirmation PDF
                     </button>
-                  )}
+                    
+                    {b.status !== 'Confirmed' && (
+                      <button className="btn-card-secondary" style={{ border: '1px solid var(--danger)', color: 'var(--danger)', fontSize: '0.8rem' }} onClick={() => cancelBooking(b.id, b.propertyTitle)}>
+                        Cancel Booking
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -491,7 +923,14 @@ export default function StudentDashboard({
                   </tr>
                 </thead>
                 <tbody>
-                  {payments.map((p, idx) => (
+                  {displayPayments.length === 0 ? (
+                    <tr>
+                      <td colSpan="7" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        No payments recorded yet. Click "Pay Rent Online" above to submit a rent payment request.
+                      </td>
+                    </tr>
+                  ) : (
+                    displayPayments.map((p, idx) => (
                     <tr key={p.id || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '1rem', fontWeight: '800', color: '#1e293b', fontSize: '0.85rem' }}>{p.receiptNo || p.receiptId}</td>
                       <td style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem', fontWeight: '600' }}>{p.month}</td>
@@ -529,7 +968,10 @@ export default function StudentDashboard({
                               gap: '0.35rem',
                               cursor: 'pointer'
                             }} 
-                            onClick={() => setSelectedReceipt(p)}
+                            onClick={() => {
+                              setSelectedReceipt(p);
+                              downloadPaymentReceipt(p);
+                            }}
                           >
                             <FileDown size={14} /> Download PDF
                           </button>
@@ -540,7 +982,7 @@ export default function StudentDashboard({
                         )}
                       </td>
                     </tr>
-                  ))}
+                  )))}
                 </tbody>
               </table>
             </div>
@@ -619,7 +1061,7 @@ export default function StudentDashboard({
           {/* Add Review Modal */}
           {showAddReviewModal && (
             <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '1rem' }}>
-              <div style={{ background: 'white', padding: '2rem', borderRadius: '12px', width: '100%', maxWidth: '480px', boxShadow: 'var(--shadow-md)' }}>
+              <div style={{ background: 'white', padding: '2rem', borderRadius: '12px', width: '100%', maxWidth: '500px', boxShadow: 'var(--shadow-md)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
                   <h3 style={{ fontSize: '1.2rem', fontWeight: '800' }}>Write Rating & Review</h3>
                   <button style={{ background: 'none', border: 'none', cursor: 'pointer' }} onClick={() => setShowAddReviewModal(false)}>
@@ -628,11 +1070,83 @@ export default function StudentDashboard({
                 </div>
 
                 <form onSubmit={handleCreateReview} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {/* Step 1: Category Selector */}
                   <div className="form-group">
-                    <label className="filter-label">Target (Property / Landlord / Roommate)</label>
-                    <input type="text" className="form-input" value={newReviewTarget} onChange={(e) => setNewReviewTarget(e.target.value)} required />
+                    <label className="filter-label">Target Type (Property / Landlord / Roommate)</label>
+                    <select 
+                      className="form-input" 
+                      value={reviewCategory} 
+                      onChange={(e) => {
+                        const cat = e.target.value;
+                        setReviewCategory(cat);
+                        if (cat === 'Property') {
+                          setNewReviewTarget(availablePropertyOptions[0]?.title || 'Mirpur House');
+                        } else if (cat === 'Landlord') {
+                          setNewReviewTarget(landlordOptions[0]);
+                        } else if (cat === 'Roommate') {
+                          setNewReviewTarget(roommateOptions[0]);
+                        }
+                      }}
+                    >
+                      <option value="Property">🏠 Property (My Booked / Saved Properties)</option>
+                      <option value="Landlord">👤 Landlord / Property Owner</option>
+                      <option value="Roommate">🤝 Roommate Match</option>
+                    </select>
                   </div>
 
+                  {/* Step 2: Dynamic Target Box */}
+                  <div className="form-group">
+                    <label className="filter-label">
+                      {reviewCategory === 'Property' ? 'Select Booked / Saved Property' : reviewCategory === 'Landlord' ? 'Select Landlord' : 'Select Roommate Candidate'}
+                    </label>
+                    
+                    {reviewCategory === 'Property' && (
+                      <select 
+                        className="form-input" 
+                        value={newReviewTarget || (availablePropertyOptions[0]?.title || '')} 
+                        onChange={(e) => setNewReviewTarget(e.target.value)}
+                        required
+                      >
+                        {availablePropertyOptions.map(p => (
+                          <option key={p.id} value={p.title}>
+                            {p.title} — {p.location || 'Mirpur, Dhaka'} (৳{p.price}/mo)
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    {reviewCategory === 'Landlord' && (
+                      <select 
+                        className="form-input" 
+                        value={newReviewTarget || landlordOptions[0]} 
+                        onChange={(e) => setNewReviewTarget(e.target.value)}
+                        required
+                      >
+                        {landlordOptions.map((landlord, i) => (
+                          <option key={i} value={landlord}>
+                            {landlord}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    {reviewCategory === 'Roommate' && (
+                      <select 
+                        className="form-input" 
+                        value={newReviewTarget || roommateOptions[0]} 
+                        onChange={(e) => setNewReviewTarget(e.target.value)}
+                        required
+                      >
+                        {roommateOptions.map((rm, i) => (
+                          <option key={i} value={rm}>
+                            {rm}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  {/* Step 3: Rating */}
                   <div className="form-group">
                     <label className="filter-label">Rating (1 to 5 Stars)</label>
                     <select className="form-input" value={newReviewRating} onChange={(e) => setNewReviewRating(e.target.value)}>
@@ -644,9 +1158,17 @@ export default function StudentDashboard({
                     </select>
                   </div>
 
+                  {/* Step 4: Review Details */}
                   <div className="form-group">
                     <label className="filter-label">Your Review Details</label>
-                    <textarea className="form-input" rows="3" placeholder="Share your experience..." value={newReviewComment} onChange={(e) => setNewReviewComment(e.target.value)} required />
+                    <textarea 
+                      className="form-input" 
+                      rows="3" 
+                      placeholder={`Share your experience with this ${reviewCategory.toLowerCase()}...`} 
+                      value={newReviewComment} 
+                      onChange={(e) => setNewReviewComment(e.target.value)} 
+                      required 
+                    />
                   </div>
 
                   <button type="submit" className="btn-filter-apply" style={{ justifyContent: 'center', padding: '0.75rem' }}>
@@ -668,94 +1190,35 @@ export default function StudentDashboard({
               <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Track property bookings, payment receipts, roommate requests, landlord messages, and report statuses.</p>
             </div>
             <span className="badge-pill-light" style={{ background: '#dbeafe', color: '#1e40af', fontWeight: 700, fontSize: '0.8rem' }}>
-              7 Recent Alerts
+              {(notifications || []).length} Live Alerts
             </span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {/* 1. Books Property -> Booking Sent */}
-            <div style={{ padding: '1rem 1.25rem', border: '1px solid var(--border-light)', borderRadius: '8px', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '1.2rem' }}>📅</span>
-                <div>
-                  <h4 style={{ fontWeight: '800', fontSize: '0.9rem', margin: 0, color: 'var(--text-main)' }}>Booking Sent</h4>
-                  <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>Your room booking application for "Dhaka Premium Sublet" was submitted to Landlord.</p>
-                </div>
+            {(notifications || []).length === 0 ? (
+              <div style={{ padding: '3rem', textAlign: 'center', background: 'white', borderRadius: '8px', border: '1px solid var(--border-light)' }}>
+                <Bell size={36} style={{ color: 'var(--text-light)', marginBottom: '0.5rem' }} />
+                <h4 style={{ fontWeight: '700' }}>No Recent Notifications</h4>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Your real-time notifications for bookings, payments, and messages will appear here.</p>
               </div>
-              <span className="badge-pill-light" style={{ background: '#dbeafe', color: '#1e40af', fontSize: '0.75rem', fontWeight: 700 }}>10 mins ago</span>
-            </div>
-
-            {/* 2. Landlord Accepts -> Booking Accepted */}
-            <div style={{ padding: '1rem 1.25rem', border: '1px solid var(--border-light)', borderRadius: '8px', background: '#ecfdf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '1.2rem' }}>👍</span>
-                <div>
-                  <h4 style={{ fontWeight: '800', fontSize: '0.9rem', margin: 0, color: '#047857' }}>Booking Accepted</h4>
-                  <p style={{ fontSize: '0.825rem', color: '#065f46', margin: '0.15rem 0 0 0' }}>Landlord Mehadi Hasan ACCEPTED your booking application! Move-in date confirmed.</p>
+            ) : (
+              (notifications || []).map((n, i) => (
+                <div key={n.id || i} style={{ padding: '1rem 1.25rem', border: '1px solid var(--border-light)', borderRadius: '8px', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <span style={{ fontSize: '1.2rem' }}>
+                      {(n.title || '').includes('Booking') ? '📅' : (n.title || '').includes('Payment') ? '💳' : (n.title || '').includes('Saved') ? '💖' : '🔔'}
+                    </span>
+                    <div>
+                      <h4 style={{ fontWeight: '800', fontSize: '0.9rem', margin: 0, color: 'var(--text-main)' }}>{n.title}</h4>
+                      <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>{n.desc || n.message}</p>
+                    </div>
+                  </div>
+                  <span className="badge-pill-light" style={{ background: '#dbeafe', color: '#1e40af', fontSize: '0.75rem', fontWeight: 700 }}>
+                    {n.time || 'Just now'}
+                  </span>
                 </div>
-              </div>
-              <span className="badge-pill-light" style={{ background: '#a7f3d0', color: '#047857', fontSize: '0.75rem', fontWeight: 700 }}>2 hours ago</span>
-            </div>
-
-            {/* 3. Pays Rent -> Payment Successful */}
-            <div style={{ padding: '1rem 1.25rem', border: '1px solid var(--border-light)', borderRadius: '8px', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '1.2rem' }}>💳</span>
-                <div>
-                  <h4 style={{ fontWeight: '800', fontSize: '0.9rem', margin: 0, color: 'var(--text-main)' }}>Payment Successful</h4>
-                  <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>July rent payment (৳1,200 BDT) processed via bKash. Receipt #TXN-88192 issued.</p>
-                </div>
-              </div>
-              <span className="badge-pill-light" style={{ background: '#d1fae5', color: '#065f46', fontSize: '0.75rem', fontWeight: 700 }}>Yesterday</span>
-            </div>
-
-            {/* 4. Roommate Request -> Request Received */}
-            <div style={{ padding: '1rem 1.25rem', border: '1px solid var(--border-light)', borderRadius: '8px', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '1.2rem' }}>🤝</span>
-                <div>
-                  <h4 style={{ fontWeight: '800', fontSize: '0.9rem', margin: 0, color: 'var(--text-main)' }}>Roommate Request Received</h4>
-                  <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>Nirob Ahmed sent you a roommate match request (94% Lifestyle Compatibility).</p>
-                </div>
-              </div>
-              <span className="badge-pill-light" style={{ background: '#f3e8ff', color: '#6b21a8', fontSize: '0.75rem', fontWeight: 700 }}>Yesterday</span>
-            </div>
-
-            {/* 5. Landlord Messages -> New Message */}
-            <div style={{ padding: '1rem 1.25rem', border: '1px solid var(--border-light)', borderRadius: '8px', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '1.2rem' }}>💬</span>
-                <div>
-                  <h4 style={{ fontWeight: '800', fontSize: '0.9rem', margin: 0, color: 'var(--text-main)' }}>New Landlord Message</h4>
-                  <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>Landlord Mehadi Hasan sent a message: "Key handover scheduled for 10 AM on Friday."</p>
-                </div>
-              </div>
-              <span className="badge-pill-light" style={{ background: '#fef3c7', color: '#b45309', fontSize: '0.75rem', fontWeight: 700 }}>2 days ago</span>
-            </div>
-
-            {/* 6. Submit Report/Complaint -> Report Submitted */}
-            <div style={{ padding: '1rem 1.25rem', border: '1px solid var(--border-light)', borderRadius: '8px', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '1.2rem' }}>⚠️</span>
-                <div>
-                  <h4 style={{ fontWeight: '800', fontSize: '0.9rem', margin: 0, color: 'var(--text-main)' }}>Report Submitted</h4>
-                  <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>Your support case #REP-804 regarding wifi maintenance was logged to Admin.</p>
-                </div>
-              </div>
-              <span className="badge-pill-light" style={{ background: '#fee2e2', color: '#991b1b', fontSize: '0.75rem', fontWeight: 700 }}>3 days ago</span>
-            </div>
-
-            {/* 7. Admin Updates Report -> Report Status Updated */}
-            <div style={{ padding: '1rem 1.25rem', border: '1px solid var(--border-light)', borderRadius: '8px', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '1.2rem' }}>✅</span>
-                <div>
-                  <h4 style={{ fontWeight: '800', fontSize: '0.9rem', margin: 0, color: 'var(--text-main)' }}>Report Status Updated</h4>
-                  <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>RentEase Admin updated Case #REP-804 to "RESOLVED: Landlord notified and fixed router."</p>
-                </div>
-              </div>
-              <span className="badge-pill-light" style={{ background: '#ecfdf5', color: '#047857', fontSize: '0.75rem', fontWeight: 700 }}>4 days ago</span>
-            </div>
+              ))
+            )}
           </div>
         </div>
       )}
@@ -878,7 +1341,7 @@ export default function StudentDashboard({
                 className="btn-filter-apply" 
                 style={{ flex: 1, justifyContent: 'center', padding: '0.65rem' }} 
                 onClick={() => {
-                  window.print();
+                  downloadPaymentReceipt(selectedReceipt);
                 }}
               >
                 <Printer size={16} /> Print / Save PDF

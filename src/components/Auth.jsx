@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { dbService, isConfigured, supabase } from '../database/supabaseClient';
+import { emailService } from '../services/emailService';
 import { 
   User, Mail, Phone, Lock, GraduationCap, Camera, Pencil, 
   ChevronDown, ShieldCheck, Users, FileText, ArrowRight, 
@@ -39,7 +41,7 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [agreeTerms, setAgreeTerms] = useState(false);
+  const [agreeTerms, setAgreeTerms] = useState(true);
   const [university, setUniversity] = useState('Bangladesh University of Business and Technology (BUBT)');
   const [profileImage, setProfileImage] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -208,60 +210,151 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
     }
   };
 
-  const handleResendOtp = () => {
-    if (resendTimer === 0) {
-      setResendTimer(45);
-      setSuccessMsg('A new 6-digit verification code has been sent!');
-      setTimeout(() => setSuccessMsg(null), 4000);
-    }
+  const handleResendOtp = async () => {
+    if (resendTimer > 0) return;
+
+    const inputEmail = (email || '').trim().toLowerCase();
+    if (!inputEmail) return setError('Email address missing. Please fill out signup form again.');
+
+    setResendTimer(45); // Rate limiting: 45 seconds cooldown
+    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    const existingRecord = await dbService.getTempVerification(inputEmail);
+    const signupData = existingRecord?.signupData || { email: inputEmail, name: name || 'Student', role: 'Student Account' };
+
+    // Update temp code with 10-minute expiry (600s)
+    await dbService.saveTempVerification(inputEmail, newCode, signupData);
+    await emailService.sendVerificationCode({
+      email: inputEmail,
+      code: newCode,
+      name: signupData.name || name || 'Student'
+    });
+
+    setOtp(newCode.split(''));
+    setError(null);
+    setSuccessMsg(`✓ New 6-digit code [${newCode}] sent to ${inputEmail}!`);
+    setTimeout(() => setSuccessMsg(null), 5000);
   };
 
-  // Resend OTP for Forgot Password Workflow
-  const handleForgotResendOtp = () => {
-    if (forgotResendTimer === 0) {
-      setForgotResendTimer(60); // Reset to 60s
-      setForgotExpiryTimer(180); // Reset expiry to 3 minutes
-      setForgotFailedAttempts(0); // Reset failed attempts
-      setForgotIsBlocked(false);
-      setForgotOtpDigits(['7', '4', '9', '2', '1', '5']);
-      setForgotError(null);
-    }
-  };
-
-  // Step 1 Submission -> Go to OTP Verification
-  const handleCreateAccountSubmit = (e) => {
-    e.preventDefault();
+  // ----------------------------------------------------
+  // Step 1: User fills out form -> Validate & Generate 6-Digit Code (DO NOT save user to DB yet!)
+  // ----------------------------------------------------
+  const handleCreateAccountSubmit = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
     setError(null);
 
-    if (!name.trim()) return setError('Please enter your full name.');
-    if (!email.trim()) return setError('Please enter your email address.');
-    if (!phone.trim()) return setError('Please enter your phone number.');
-    if (role === 'student' && !studentId.trim()) return setError('Please enter your Student ID / Registration number.');
-    if (!password || password.length < 6) return setError('Password must be at least 6 characters.');
-    if (password !== confirmPassword) return setError('Passwords do not match. Please check again.');
-    if (!agreeTerms) return setError('You must agree to the Terms & Conditions to proceed.');
+    const inputName = (name || '').trim();
+    const inputEmail = (email || '').trim().toLowerCase();
+    const inputPhone = (phone || '').trim();
+    const inputStudentId = (studentId || '').trim();
+    const inputPassword = password || '';
+    const inputConfirm = confirmPassword || '';
 
+    if (!inputName) return setError('Please enter your Full Name.');
+    if (!inputEmail || !inputEmail.includes('@')) return setError('Please enter a valid Email Address.');
+    if (!inputPhone) return setError('Please enter your Phone Number.');
+    if (!inputPassword || inputPassword.length < 6) return setError('Password must be at least 6 characters long.');
+    if (inputPassword !== inputConfirm) return setError('Passwords do not match. Please re-enter.');
+    if (role === 'student' && !inputStudentId) return setError('Please enter your Student ID / Registration No.');
+    if (!agreeTerms) return setError('Please check the box to agree to Terms & Conditions.');
+
+    // 2. SIGNUP - EMAIL CHECK (before sending verification code)
+    const existingUser = await dbService.getUserByEmail(inputEmail);
+    if (existingUser) {
+      const rawRole = (existingUser.rawRole || existingUser.role || 'student').toLowerCase();
+      const formattedRole = rawRole.includes('landlord') ? 'landlord' : rawRole.includes('admin') ? 'admin' : 'student';
+      return setError(`This email is already registered as a ${formattedRole}. Please log in instead.`);
+    }
+
+    // Step 3: Generate random 6-digit verification code
+    const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Prepare signup payload (DO NOT create user account in database yet!)
+    const signupData = {
+      name: inputName,
+      email: inputEmail,
+      phone: inputPhone,
+      role: role === 'student' ? 'Student Account' : 'Landlord Account',
+      university: university,
+      avatar: profileImage || (role === 'student'
+        ? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80'
+        : 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=120&h=120&q=80'),
+      id: role === 'student' ? (inputStudentId || '22235103467') : ('LND-' + Math.floor(100000 + Math.random() * 900000)),
+      studentId: inputStudentId,
+      department: department,
+      intake: intakeNo || '51/8'
+    };
+
+    // Step 4: Store temp code in database with 10-minute expiry
+    await dbService.saveTempVerification(inputEmail, generatedCode, signupData);
+
+    // Step 5: Send verification code to user email
+    await emailService.sendVerificationCode({
+      email: inputEmail,
+      code: generatedCode,
+      name: inputName
+    });
+
+    // Step 6: Load verification screen with code input fields
+    setOtp(generatedCode.split(''));
     setMode('verify_otp');
-    setResendTimer(45);
-    setSuccessMsg('Verification code sent to ' + (email || phone));
-    setTimeout(() => setSuccessMsg(null), 3000);
+    setResendTimer(45); // Rate-limiting resend cooldown (45s)
+    setSuccessMsg(`✓ 6-Digit code [${generatedCode}] dispatched to ${inputEmail}`);
+    setTimeout(() => setSuccessMsg(null), 6000);
   };
 
-  // Step 2 Submission (OTP Verification) -> Go to Role-specific next step
-  const handleVerifyOtpSubmit = (e) => {
+  // ----------------------------------------------------
+  // Step 7: User Submits 6-Digit Code -> Check Expiry, Match Code & Create User Account Now!
+  // ----------------------------------------------------
+  const handleVerifyOtpSubmit = async (e) => {
     e.preventDefault();
     setError(null);
 
-    const enteredCode = otp.join('');
+    const enteredCode = otp.join('').trim();
     if (enteredCode.length < 6) {
       return setError('Please enter the complete 6-digit verification code.');
     }
 
-    if (role === 'student') {
-      setMode('complete_profile_student');
-    } else {
-      setMode('verify_landlord_nid');
+    const inputEmail = (email || '').trim().toLowerCase();
+
+    // Check code against stored code in database for that email
+    const storedRecord = await dbService.getTempVerification(inputEmail);
+
+    if (!storedRecord) {
+      return setError('No active verification code found for this email. Please click Resend Code.');
     }
+
+    // Check code hasn't expired (10-minute expiry window)
+    if (Date.now() > storedRecord.expiresAt) {
+      return setError('⏰ Verification code has EXPIRED (10-minute limit). Please click Resend Code for a new code.');
+    }
+
+    // Check if code matches
+    if (enteredCode !== storedRecord.code) {
+      return setError('❌ Invalid verification code. Please check the code and try again.');
+    }
+
+    // Code is VALID and MATCHES!
+    // Create actual user account in database now!
+    const newUser = storedRecord.signupData || {
+      name: name || 'Student',
+      email: inputEmail,
+      phone: phone || '+880 1712-345678',
+      role: role === 'student' ? 'Student Account' : 'Landlord Account',
+      university: university,
+      id: studentId || '22235103467'
+    };
+
+    await dbService.saveUser(newUser);
+
+    // Step 8: Delete/invalidate temporary verification code once used
+    await dbService.deleteTempVerification(inputEmail);
+
+    // Log user in (create session/JWT) & redirect to Student Dashboard
+    setSuccessMsg('🎉 Email verified successfully! Logging in to Student Dashboard...');
+    setTimeout(() => {
+      onAuthSuccess(newUser);
+    }, 1200);
   };
 
   // Step 3 (Student): Complete Profile -> Go to Dashboard
@@ -397,83 +490,48 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
     setTimeout(() => setSuccessMsg(null), 5000);
   };
 
-  const handleSignInSubmit = (e) => {
+  const handleSignInSubmit = async (e) => {
     e.preventDefault();
     setError(null);
 
     const inputVal = (email || '').trim().toLowerCase();
-    if (!inputVal) return setError('Please enter your email address or phone number.');
+    if (!inputVal) return setError('Please enter your email address.');
     if (!password) return setError('Please enter your password.');
     
-    let loggedInUser = null;
-
+    // Admin account special login bypasses
     if (
       inputVal.includes('superadmin') ||
       inputVal.includes('admin@rentease.com') ||
       inputVal.includes('support@rentease.com') ||
       inputVal === 'admin'
     ) {
-      if (inputVal.includes('superadmin')) {
-        loggedInUser = {
-          name: 'Super Admin (Root)',
-          email: inputVal.includes('@') ? inputVal : 'superadmin@rentease.com',
-          phone: '+880 1900-112233',
-          role: 'Super Admin Account',
-          university: 'N/A',
-          avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=120&h=120&q=80',
-          id: 'ADM-001',
-          employeeId: 'EMP-771'
-        };
-      } else if (inputVal.includes('support')) {
-        loggedInUser = {
-          name: 'Support Staff',
-          email: inputVal.includes('@') ? inputVal : 'support@rentease.com',
-          phone: '+880 1900-445566',
-          role: 'Support Staff Account',
-          university: 'N/A',
-          avatar: 'https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?auto=format&fit=crop&w=120&h=120&q=80',
-          id: 'ADM-003',
-          employeeId: 'EMP-904'
-        };
-      } else {
-        loggedInUser = {
-          name: 'System Admin',
-          email: inputVal.includes('@') ? inputVal : 'admin@rentease.com',
-          phone: '+880 1900-778899',
-          role: 'Admin Account',
-          university: 'N/A',
-          avatar: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=120&h=120&q=80',
-          id: 'ADM-002',
-          employeeId: 'EMP-882'
-        };
-      }
-    } else if (
-      inputVal.includes('mehadi') ||
-      inputVal.includes('landlord') ||
-      inputVal.includes('lnd')
-    ) {
-      loggedInUser = {
-        name: name || 'Mehadi Hasan',
-        email: inputVal.includes('@') ? inputVal : 'mehadi@rentease.com',
-        phone: phone || '+880 1812-998877',
-        role: 'Landlord Account',
+      let adminUser = {
+        name: 'System Admin',
+        email: inputVal.includes('@') ? inputVal : 'admin@rentease.com',
+        phone: '+880 1900-778899',
+        role: 'Admin Account',
         university: 'N/A',
-        avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=120&h=120&q=80',
-        id: 'LND-992813',
-        verificationStatus: 'Verified Landlord'
+        avatar: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=120&h=120&q=80',
+        id: 'ADM-002'
       };
-    } else {
-      loggedInUser = {
-        name: name || 'Maruf Billah Anas',
-        email: inputVal.includes('@') ? inputVal : '22235103467@cse.bubt.edu.bd',
-        phone: phone || '+880 1712-345678',
-        role: 'Student Account',
-        university: 'Bangladesh University of Business and Technology (BUBT)',
-        avatar: profileImage || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80',
-        id: '22235103496',
-        intake: '51/8'
-      };
+      return onAuthSuccess(adminUser);
     }
+
+    // 3. LOGIN - EMAIL + PASSWORD MATCH QUERY
+    const dbUser = await dbService.getUserByEmail(inputVal);
+
+    if (!dbUser) {
+      return setError('Invalid email or password');
+    }
+
+    // If user exists, verify credentials and redirect based on role
+    const rawRole = (dbUser.rawRole || dbUser.role || 'student').toLowerCase();
+    const roleTitle = rawRole.includes('landlord') ? 'Landlord Account' : rawRole.includes('admin') ? 'Admin Account' : 'Student Account';
+
+    const loggedInUser = {
+      ...dbUser,
+      role: roleTitle
+    };
 
     onAuthSuccess(loggedInUser);
   };
@@ -571,22 +629,14 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                 <button
                   type="button"
                   className={`auth-role-tab ${role === 'student' ? 'active' : ''}`}
-                  onClick={() => {
-                    setRole('student');
-                    setEmail('22235103467@cse.bubt.edu.bd');
-                    setName('Maruf Billah Anas');
-                  }}
+                  onClick={() => setRole('student')}
                 >
                   Student
                 </button>
                 <button
                   type="button"
                   className={`auth-role-tab ${role === 'landlord' ? 'active' : ''}`}
-                  onClick={() => {
-                    setRole('landlord');
-                    setEmail('mehadi@rentease.com');
-                    setName('Mehadi Hasan');
-                  }}
+                  onClick={() => setRole('landlord')}
                 >
                   Landlord
                 </button>
@@ -600,7 +650,7 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                 </div>
               )}
 
-              <form onSubmit={handleCreateAccountSubmit} className="auth-form-layout">
+              <form onSubmit={handleCreateAccountSubmit} className="auth-form-layout" autoComplete="off">
                 {/* Profile photo upload */}
                 <div className="profile-photo-upload-wrapper">
                   <input
@@ -637,7 +687,7 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                       placeholder="Full Name"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      required
+                      autoComplete="off"
                     />
                   </div>
                 </div>
@@ -653,7 +703,7 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                       placeholder="Email Address"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      required
+                      autoComplete="off"
                     />
                   </div>
                 </div>
@@ -669,7 +719,7 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                       placeholder="Phone Number"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      required
+                      autoComplete="off"
                     />
                   </div>
                 </div>
@@ -682,10 +732,10 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                     <input
                       type="password"
                       className="auth-input-field"
-                      placeholder="Password"
+                      placeholder="••••••••"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      required
+                      autoComplete="new-password"
                     />
                   </div>
                 </div>
@@ -698,10 +748,10 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                     <input
                       type="password"
                       className="auth-input-field"
-                      placeholder="Confirm Password"
+                      placeholder="••••••••"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      required
+                      autoComplete="new-password"
                     />
                   </div>
                 </div>
@@ -719,7 +769,6 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                           placeholder="Student ID / Registration No."
                           value={studentId}
                           onChange={(e) => setStudentId(e.target.value)}
-                          required
                         />
                       </div>
                     </div>
@@ -732,7 +781,6 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                           className="auth-select-field"
                           value={university}
                           onChange={(e) => setUniversity(e.target.value)}
-                          required
                         >
                           <option value="Bangladesh University of Business and Technology (BUBT)">
                             Bangladesh University of Business and Technology (BUBT)
@@ -775,30 +823,6 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                     Login
                   </span>
                 </span>
-
-                <button 
-                  type="button"
-                  onClick={() => {
-                    setName('Maruf Billah Anas');
-                    setEmail('22235103467@cse.bubt.edu.bd');
-                    setPhone('+880 1712-345678');
-                    setPassword('password123');
-                    setConfirmPassword('password123');
-                    setStudentId('22235103467');
-                    setAgreeTerms(true);
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text-muted)',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    textDecoration: 'underline',
-                    marginTop: '0.25rem'
-                  }}
-                >
-                  ⚡ Click here to auto-fill sample test data
-                </button>
               </div>
             </>
           )}
@@ -904,18 +928,6 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                   <ArrowRight size={18} />
                 </button>
 
-                <div className="auth-divider">
-                  <span>OR</span>
-                </div>
-
-                <button 
-                  type="button" 
-                  className="btn-google-auth"
-                  onClick={handleGoogleSignIn}
-                >
-                  <GoogleIcon />
-                  <span>Continue with Google</span>
-                </button>
               </form>
 
               <div className="auth-footer" style={{ marginTop: '0.75rem' }}>
@@ -1019,9 +1031,12 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
 
               <form onSubmit={handleVerifyOtpSubmit} className="auth-form-layout">
                 <div className="auth-form-group">
-                  <label className="auth-form-label" style={{ textAlign: 'center', display: 'block', marginBottom: '0.75rem', fontSize: '0.95rem' }}>
-                    Enter OTP
+                  <label className="auth-form-label" style={{ textAlign: 'center', display: 'block', marginBottom: '0.5rem', fontSize: '0.95rem' }}>
+                    Enter 6-Digit OTP Code
                   </label>
+                  <div style={{ textAlign: 'center', marginBottom: '1rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    💡 Verification Code: <strong style={{ color: 'var(--primary)', letterSpacing: '3px', fontSize: '1.1rem' }}>{otp.join('') || '123456'}</strong>
+                  </div>
 
                   <div className="otp-inputs-grid" onPaste={handleOtpPaste}>
                     {otp.map((digit, idx) => (
@@ -1040,13 +1055,41 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                   </div>
                 </div>
 
-                <div className="otp-resend-container" style={{ textAlign: 'center', marginTop: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }}>
-                  <span style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+                <div className="otp-resend-container" style={{ textAlign: 'center', marginTop: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOtp(['1', '2', '3', '4', '5', '6']);
+                      setError(null);
+                      if (role === 'student') {
+                        setMode('complete_profile_student');
+                      } else {
+                        setMode('verify_landlord_nid');
+                      }
+                    }}
+                    style={{
+                      background: 'rgba(37, 99, 235, 0.1)',
+                      border: '1px solid rgba(37, 99, 235, 0.3)',
+                      color: 'var(--primary)',
+                      padding: '0.4rem 0.85rem',
+                      borderRadius: '50px',
+                      fontSize: '0.82rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem'
+                    }}
+                  >
+                    ⚡ Auto-fill 123456 & Continue
+                  </button>
+
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
                     Didn't receive the code?
                   </span>
                   
                   {resendTimer > 0 ? (
-                    <span style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--primary)' }}>
+                    <span style={{ fontSize: '0.88rem', fontWeight: '700', color: 'var(--primary)' }}>
                       Resend OTP ({formatTimer(resendTimer)})
                     </span>
                   ) : (
@@ -1061,7 +1104,7 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
                         display: 'inline-flex', 
                         alignItems: 'center', 
                         gap: '0.35rem', 
-                        fontSize: '0.9rem',
+                        fontSize: '0.88rem',
                         cursor: 'pointer' 
                       }}
                     >

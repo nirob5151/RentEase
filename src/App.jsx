@@ -13,7 +13,8 @@ import CustomerCareWidget from './components/CustomerCareWidget';
 import { DEFAULT_LISTINGS, DEFAULT_CHATS } from './database/mockDb';
 import { dbService, isConfigured } from './database/supabaseClient';
 import DatabaseViewer from './components/DatabaseViewer';
-import { Home as HomeIcon, Search, Users, MessageSquare, FileText, Bell, LogOut, HelpCircle, Heart, Star, Settings, Plus, Calendar, CreditCard, BarChart3, ShieldCheck, AlertCircle, Lock, Database as DatabaseIcon, CheckCircle2 } from 'lucide-react';
+import { getAvatarUrl } from './utils/profileCompleteness';
+import { Home as HomeIcon, Search, Users, MessageSquare, FileText, Bell, LogOut, HelpCircle, Heart, Star, Settings, Plus, Calendar, CreditCard, BarChart3, ShieldCheck, AlertCircle, Lock, Database as DatabaseIcon, CheckCircle2, Mail, Phone } from 'lucide-react';
 
 
 function App() {
@@ -44,10 +45,59 @@ function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
+  // Saved properties state for students
+  const [savedPropertyIds, setSavedPropertyIds] = useState(() => {
+    const saved = localStorage.getItem('rentease_saved_properties');
+    if (!saved) return [];
+    try {
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(id => id !== 'prop_1' && id !== 'prop_2' && id !== 'prop_3') : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Booked properties state for students
+  const [userBookedPropertyIds, setUserBookedPropertyIds] = useState(() => {
+    const saved = localStorage.getItem('rentease_booked_properties');
+    if (!saved) return [];
+    try {
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(id => id !== 'prop_1' && id !== 'prop_2' && id !== 'prop_3') : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const toggleSaveProperty = (propertyId) => {
+    setSavedPropertyIds(prev => {
+      const isSaved = prev.includes(propertyId);
+      const updated = isSaved ? prev.filter(id => id !== propertyId) : [...prev, propertyId];
+      localStorage.setItem('rentease_saved_properties', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const recordPropertyBooking = (propertyId) => {
+    if (!propertyId) return;
+    setUserBookedPropertyIds(prev => {
+      if (prev.includes(propertyId)) return prev;
+      const updated = [...prev, propertyId];
+      localStorage.setItem('rentease_booked_properties', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Dynamic reviews state
+  const [reviews, setReviews] = useState([]);
+
   // Initial load from Database Service
   useEffect(() => {
     dbService.getListings().then(data => {
       if (data && data.length > 0) setListings(data);
+    });
+    dbService.getReviews().then(data => {
+      if (Array.isArray(data)) setReviews(data);
     });
     dbService.getPayments().then(data => {
       if (data && data.length > 0) setSharedPayments(data);
@@ -55,12 +105,32 @@ function App() {
     dbService.getChats().then(data => {
       if (data && data.length > 0) setChats(data);
     });
+    dbService.getNotifications().then(data => {
+      if (Array.isArray(data) && data.length > 0) {
+        setNotifications(data.map(n => ({
+          id: n.id || 'notif_' + Math.random(),
+          title: n.title || 'Notification',
+          desc: n.message || n.desc || '',
+          category: n.category || 'General',
+          time: n.created_at ? new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now',
+          read: Boolean(n.is_read)
+        })));
+      }
+    });
+
+    const unsubscribeNotifs = dbService.subscribeToNotifications((newNotif) => {
+      setNotifications(prev => [newNotif, ...prev]);
+    });
 
     if (isConfigured) {
       setDbStatusMsg('⚡ Supabase Cloud Database Connected');
     } else {
       setDbStatusMsg('⚡ Database Ready (Persistent Local + Cloud Engine)');
     }
+
+    return () => {
+      if (unsubscribeNotifs) unsubscribeNotifs();
+    };
   }, []);
 
   useEffect(() => {
@@ -84,25 +154,37 @@ function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem('rentease_listings', JSON.stringify(listings));
+    try {
+      localStorage.setItem('rentease_listings', JSON.stringify(listings));
+    } catch (e) {
+      console.warn('localStorage setItem listings error:', e);
+    }
   }, [listings]);
 
   useEffect(() => {
-    localStorage.setItem('rentease_chats', JSON.stringify(chats));
+    try {
+      localStorage.setItem('rentease_chats', JSON.stringify(chats));
+    } catch (e) {
+      console.warn('localStorage setItem chats error:', e);
+    }
   }, [chats]);
 
   useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem('rentease_user', JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem('rentease_user');
+    try {
+      if (currentUser) {
+        localStorage.setItem('rentease_user', JSON.stringify(currentUser));
+      } else {
+        localStorage.removeItem('rentease_user');
+      }
+    } catch (e) {
+      console.warn('localStorage setItem user error:', e);
     }
   }, [currentUser]);
 
   // Auth Redirect Guard
   useEffect(() => {
     if (!currentUser && [
-      'dashboard', 'messages', 'contract', 'saved', 'settings', 'roommate',
+      'dashboard', 'messages', 'contract', 'saved', 'settings',
       'student_bookings', 'student_payments', 'student_reviews', 'student_notifications', 'student_profile', 'help',
       'landlord_properties', 'landlord_add_property', 'landlord_bookings',
       'landlord_tenants', 'landlord_contracts', 'landlord_payments',
@@ -151,34 +233,180 @@ function App() {
     setListings(prev => prev.filter(item => item.id !== id));
   };
 
-  const addReview = (listingId, review) => {
+  const addReview = async (listingId, review) => {
+    const fullReview = {
+      id: 'rev_' + Date.now(),
+      listingId: listingId,
+      listing_id: listingId,
+      propertyId: listingId,
+      property_id: listingId,
+      target: review.target || 'Property',
+      rating: Number(review.rating) || 5,
+      comment: review.comment || '',
+      author: review.author || 'Student',
+      date: review.date || new Date().toISOString().split('T')[0]
+    };
+
+    const updatedGlobalReviews = await dbService.saveReview(fullReview);
+    setReviews(updatedGlobalReviews);
+
     setListings(prev => prev.map(item => {
       if (item.id === listingId) {
-        const updatedReviews = [review, ...item.reviews];
-        const newRating = parseFloat(
-          ((item.landlord.rating * item.reviews.length + review.rating) / (item.reviews.length + 1)).toFixed(1)
-        );
+        const itemReviews = Array.isArray(item.reviews) ? item.reviews : [];
         return {
           ...item,
-          reviews: updatedReviews,
-          landlord: {
-            ...item.landlord,
-            rating: newRating
-          }
+          reviews: [fullReview, ...itemReviews]
         };
       }
       return item;
     }));
   };
 
-  const startChat = (contactName, initialMsgText = '') => {
+  const startChat = (contactName, initialMsgText = '', contactRole = 'Student / Roommate', avatarUrl = null, targetEmail = '', targetId = '', propertyObj = null) => {
+    const cleanName = contactName || 'Contact';
+    
+    // Support property-scoped conversation threads
+    const propId = propertyObj?.id || propertyObj?.propertyId || propertyObj?.property_id || '';
+    const propTitle = propertyObj?.title || propertyObj?.propertyTitle || propertyObj?.property_title || (contactRole !== 'Student / Roommate' ? contactRole : '');
+    const propSlug = propId ? (`_prop_${propId}`) : (propTitle ? ('_prop_' + String(propTitle).toLowerCase().replace(/[^a-z0-9]/g, '_')) : '');
+
+    const chatId = 'chat_' + String(cleanName).toLowerCase().replace(/[^a-z0-9]/g, '_') + propSlug;
+    const existingIndex = chats.findIndex(c => c.id === chatId || (c.name && c.name.toLowerCase() === cleanName.toLowerCase() && String(c.property_id || c.propertyId || '') === String(propId)));
+
+    const formattedTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const initialMsgObj = initialMsgText ? {
+      id: 'msg_' + Date.now(),
+      conversationId: chatId,
+      senderId: currentUser?.id || 'usr_1',
+      senderEmail: currentUser?.email || '',
+      senderName: currentUser?.name || 'User',
+      senderRole: isStudentUser ? 'student' : (isLandlordUser ? 'landlord' : 'admin'),
+      sender: 'sender',
+      text: initialMsgText,
+      time: formattedTime
+    } : null;
+
+    const currentEmailVal = (currentUser?.email || '').toLowerCase().trim();
+    const currentUserIdVal = (currentUser?.id || '').toString();
+
+    let updatedChats = [...chats];
+
+    if (existingIndex >= 0) {
+      const target = updatedChats[existingIndex];
+      const newMessages = initialMsgObj ? [...(target.messages || []), initialMsgObj] : (target.messages || []);
+      updatedChats[existingIndex] = {
+        ...target,
+        landlord_email: isLandlordUser ? currentEmailVal : (target.landlord_email || targetEmail || currentEmailVal),
+        landlord_id: isLandlordUser ? currentUserIdVal : (target.landlord_id || targetId || currentUserIdVal),
+        student_email: isStudentUser ? currentEmailVal : (target.student_email || targetEmail || currentEmailVal),
+        student_id: isStudentUser ? currentUserIdVal : (target.student_id || targetId || currentUserIdVal),
+        property_id: propId || target.property_id || target.propertyId || '',
+        property_title: propTitle || target.property_title || target.propertyTitle || 'Rental Inquiry',
+        role: propTitle || contactRole || target.role || 'Rental Inquiry',
+        avatar: avatarUrl || target.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+        snippet: initialMsgText || target.snippet || 'Conversation started',
+        time: formattedTime,
+        messages: newMessages
+      };
+      dbService.saveChat(updatedChats[existingIndex]);
+    } else {
+      const newChat = {
+        id: chatId,
+        name: cleanName,
+        landlord_email: isLandlordUser ? currentEmailVal : (targetEmail || currentEmailVal),
+        landlord_id: isLandlordUser ? currentUserIdVal : (targetId || currentUserIdVal),
+        student_email: isStudentUser ? currentEmailVal : (targetEmail || currentEmailVal),
+        student_id: isStudentUser ? currentUserIdVal : (targetId || currentUserIdVal),
+        property_id: propId,
+        property_title: propTitle || contactRole || 'Rental Inquiry',
+        role: propTitle || contactRole || 'Rental Inquiry',
+        time: formattedTime,
+        unread: 0,
+        snippet: initialMsgText || 'Conversation started',
+        avatar: avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+        messages: initialMsgObj ? [initialMsgObj] : []
+      };
+      updatedChats = [newChat, ...chats];
+      dbService.saveChat(newChat);
+    }
+
+    if (initialMsgObj) {
+      dbService.saveMessage(initialMsgObj);
+    }
+
+    setChats(updatedChats);
+    setActiveChatId(chatId);
     setCurrentPage('messages');
-    setActiveChatId('chat_anas');
   };
 
-  const sendChatMessage = (chatId, text) => {
-    // handled inside Messaging state
+  const sendChatMessage = async (chatId, newMsg, updatedSnippet) => {
+    const isStudentSender = isStudentUser;
+    const msgText = updatedSnippet || newMsg.text || 'Message attachment';
+
+    const fullMsg = {
+      id: 'msg_' + Date.now(),
+      conversationId: chatId,
+      senderId: currentUser?.id || 'usr_1',
+      senderEmail: currentUser?.email || '',
+      senderName: currentUser?.name || 'User',
+      senderRole: isStudentSender ? 'student' : (isLandlordUser ? 'landlord' : 'admin'),
+      text: msgText,
+      isRead: false,
+      time: newMsg.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    await dbService.saveMessage(fullMsg);
+
+    const updatedChats = chats.map(c => {
+      if (c.id === chatId) {
+        const isCurrentlyOpen = currentPage === 'messages' && activeChatId === chatId;
+        const newUnread = (!isCurrentlyOpen && isStudentSender) ? (Number(c.unread || 0) + 1) : c.unread;
+        
+        const updated = {
+          ...c,
+          snippet: msgText,
+          time: fullMsg.time,
+          unread: newUnread,
+          messages: [...(c.messages || []), fullMsg]
+        };
+        dbService.saveChat(updated);
+
+        // Trigger in-app notification for recipient if not actively viewing
+        if (isStudentSender && !isCurrentlyOpen) {
+          const newNotif = {
+            id: 'notif_msg_' + Date.now(),
+            type: 'message',
+            title: `New Message from ${currentUser?.name || 'Student'} 💬`,
+            message: msgText,
+            user_email: c.landlord_email || '',
+            time: 'Just now',
+            unread: true,
+            read: false
+          };
+          dbService.addNotification(newNotif);
+          setNotifications(prev => [newNotif, ...prev]);
+        }
+
+        return updated;
+      }
+      return c;
+    });
+    setChats(updatedChats);
   };
+
+  const markChatAsRead = (chatId) => {
+    if (!chatId) return;
+    setChats(prev => prev.map(c => {
+      if (c.id === chatId && (c.unread || 0) > 0) {
+        const updated = { ...c, unread: 0 };
+        dbService.saveChat(updated);
+        return updated;
+      }
+      return c;
+    }));
+  };
+
+  const unreadChatsCount = (chats || []).reduce((acc, c) => acc + (Number(c.unread) || 0), 0);
 
   const handleLogout = () => {
     setCurrentUser(null);
@@ -201,19 +429,52 @@ function App() {
     }));
   };
 
-  // Helper to check if page is a sidebar portal page
-  const isPortalPage = [
-    'dashboard', 'messages', 'contract', 'saved', 'settings',
-    'student_bookings', 'student_payments', 'student_reviews', 'student_notifications', 'student_profile', 'help',
+  const userRoleLower = (currentUser?.role || '').toLowerCase();
+  const isAdminUser = Boolean(currentUser && (userRoleLower.includes('admin') || userRoleLower.includes('staff') || userRoleLower.includes('root')));
+  const isLandlordUser = Boolean(currentUser && userRoleLower.includes('landlord'));
+  const isStudentUser = Boolean(currentUser && !isAdminUser && !isLandlordUser);
+
+  const currentEmail = (currentUser?.email || '').toLowerCase().trim();
+  const currentUserId = (currentUser?.id || '').toString();
+
+  // Strict User-Scoped Conversation Filtering to prevent data leaks between landlords and students
+  const userChats = (chats || []).filter(c => {
+    if (!c || !currentUser) return false;
+    if (isAdminUser) return true;
+
+    const lEmail = (c.landlord_email || c.landlordEmail || '').toLowerCase().trim();
+    const lId = (c.landlord_id || c.landlordId || '').toString();
+    const sEmail = (c.student_email || c.studentEmail || '').toLowerCase().trim();
+    const sId = (c.student_id || c.studentId || '').toString();
+
+    if (isLandlordUser) {
+      if (currentEmail && lEmail && lEmail === currentEmail) return true;
+      if (currentUserId && lId && lId === currentUserId) return true;
+      return false;
+    }
+
+    if (isStudentUser) {
+      if (currentEmail && sEmail && sEmail === currentEmail) return true;
+      if (currentUserId && sId && sId === currentUserId) return true;
+      return false;
+    }
+
+    return false;
+  });
+
+  const isPortalPage = Boolean(currentUser) && [
+    'dashboard', 'saved', 'student_bookings', 'student_payments',
+    'student_reviews', 'student_notifications', 'student_profile', 'help',
     'landlord_properties', 'landlord_add_property', 'landlord_bookings',
     'landlord_tenants', 'landlord_contracts', 'landlord_payments',
     'landlord_reviews', 'landlord_analytics', 'landlord_notifications',
-    'landlord_profile',
+    'landlord_profile', 'landlord_nid', 'profile', 'settings',
     'admin_users', 'admin_properties', 'admin_verification', 'admin_bookings', 
     'admin_contracts', 'admin_payments', 'admin_reviews', 'admin_reports', 
     'admin_analytics', 'admin_notifications', 'admin_content', 'admin_settings', 
-    'admin_security', 'admin_audit', 'admin_backup', 'admin_profile'
-  ].includes(currentPage) && currentUser !== null;
+    'admin_security', 'admin_audit', 'admin_backup', 'admin_profile',
+    'messages', 'contract'
+  ].includes(currentPage);
 
   return (
     <div className="app-container">
@@ -222,7 +483,7 @@ function App() {
         <a href="#" className="nav-brand" onClick={(e) => { e.preventDefault(); setCurrentPage('home'); }}>
           <div className="nav-logo-text">RentEase</div>
         </a>
-        {(!currentUser || (!currentUser.role.includes('Admin') && !currentUser.role.includes('Staff'))) && (
+        {(!currentUser || !isAdminUser) && (
           <nav>
             <ul className="nav-links">
               <li>
@@ -230,7 +491,7 @@ function App() {
                   Search
                 </span>
               </li>
-              {(!currentUser || !currentUser.role.includes('Landlord')) && (
+              {(!currentUser || !isLandlordUser) && (
                 <li>
                   <span className={`nav-link ${currentPage === 'roommate' ? 'active' : ''}`} onClick={() => setCurrentPage('roommate')}>
                     Roommates
@@ -242,7 +503,7 @@ function App() {
         )}
         
         <div className="nav-right-actions">
-          {currentUser && (currentUser.role?.includes('Admin') || currentUser.role?.includes('Staff')) && (
+          {currentUser && isAdminUser && (
             <button 
               className="nav-icon-btn" 
               onClick={() => setShowDbViewer(true)}
@@ -305,9 +566,9 @@ function App() {
                         style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer' }}
                         onClick={() => {
                           setShowNotifications(false);
-                          if (currentUser?.role?.includes('Student')) setCurrentPage('student_notifications');
-                          else if (currentUser?.role?.includes('Landlord')) setCurrentPage('landlord_notifications');
-                          else if (currentUser?.role?.includes('Admin')) setCurrentPage('admin_notifications');
+                          if (isStudentUser) setCurrentPage('student_notifications');
+                          else if (isLandlordUser) setCurrentPage('landlord_notifications');
+                          else if (isAdminUser) setCurrentPage('admin_notifications');
                         }}
                       >
                         View All Activity Notifications &rarr;
@@ -318,16 +579,24 @@ function App() {
               </div>
               <button className="nav-icon-btn" onClick={() => setCurrentPage('messages')} style={{ position: 'relative' }}>
                 <MessageSquare size={20} />
-                <span className="chat-inbox-unread-count" style={{ position: 'absolute', top: '-6px', right: '-6px', fontSize: '0.6rem', width: '14px', height: '14px' }}>3</span>
+                {unreadChatsCount > 0 && (
+                  <span className="chat-inbox-unread-count" style={{ position: 'absolute', top: '-6px', right: '-6px', fontSize: '0.65rem', minWidth: '16px', height: '16px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>
+                    {unreadChatsCount}
+                  </span>
+                )}
               </button>
               <img 
-                src={currentUser.avatar || "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=120&h=120&q=80"} 
+                src={getAvatarUrl(currentUser)} 
                 alt="User Avatar" 
                 className="nav-avatar-icon" 
-                onClick={() => setCurrentPage('dashboard')}
+                onClick={() => {
+                  if (isLandlordUser) setCurrentPage('landlord_profile');
+                  else if (isAdminUser) setCurrentPage('admin_profile');
+                  else setCurrentPage('student_profile');
+                }}
                 onError={(e) => {
                   e.target.onerror = null;
-                  e.target.src = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=120&h=120&q=80";
+                  e.target.src = getAvatarUrl(currentUser);
                 }}
               />
             </>
@@ -351,30 +620,30 @@ function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
               <div className="sidebar-profile">
                 <img 
-                  src={currentUser.avatar || "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=120&h=120&q=80"} 
+                  src={getAvatarUrl(currentUser)} 
                   alt="User Avatar" 
                   className="sidebar-avatar" 
                   onError={(e) => {
                     e.target.onerror = null;
-                    e.target.src = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=120&h=120&q=80";
+                    e.target.src = getAvatarUrl(currentUser);
                   }}
                 />
                 <div className="sidebar-user-info">
-                  <div className="sidebar-user-name" style={{ fontSize: (currentUser.role.includes('Admin') || currentUser.role.includes('Staff')) ? '0.85rem' : '1rem' }}>
-                    {(currentUser.role.includes('Admin') || currentUser.role.includes('Staff')) ? currentUser.name : currentUser.name.split(' ').pop()}
+                  <div className="sidebar-user-name" style={{ fontSize: isAdminUser ? '0.85rem' : '1rem' }}>
+                    {isAdminUser ? currentUser.name : (currentUser.name || 'User').split(' ').pop()}
                   </div>
                   <div className="sidebar-user-role">{currentUser.role}</div>
                 </div>
               </div>
 
-              {currentUser.role.includes('Student') && (
+              {isStudentUser && (
                 <button className="sidebar-cta-btn" onClick={() => setCurrentPage('roommate')}>
                   <Users size={16} /> <span className="sidebar-btn-text">+ Find a Roommate</span>
                 </button>
               )}
 
               <ul className="sidebar-menu" style={{ maxHeight: 'calc(100vh - 280px)', overflowY: 'auto', paddingRight: '4px' }}>
-                {currentUser.role.includes('Admin') || currentUser.role.includes('Staff') ? (
+                {isAdminUser ? (
                   <>
                     <li className={`sidebar-item ${currentPage === 'dashboard' ? 'active' : ''}`} onClick={() => setCurrentPage('dashboard')}>
                       <HomeIcon size={18} /> <span className="sidebar-menu-label">Dashboard</span>
@@ -431,7 +700,7 @@ function App() {
                       <HelpCircle size={18} /> <span className="sidebar-menu-label">Help Center</span>
                     </li>
                   </>
-                ) : currentUser.role.includes('Landlord') ? (
+                ) : isLandlordUser ? (
                   <>
                     <li className={`sidebar-item ${currentPage === 'dashboard' ? 'active' : ''}`} onClick={() => setCurrentPage('dashboard')}>
                       <HomeIcon size={18} /> <span className="sidebar-menu-label">Dashboard</span>
@@ -450,6 +719,11 @@ function App() {
                     </li>
                     <li className={`sidebar-item ${currentPage === 'messages' ? 'active' : ''}`} onClick={() => setCurrentPage('messages')}>
                       <MessageSquare size={18} /> <span className="sidebar-menu-label">Messages</span>
+                      {unreadChatsCount > 0 && (
+                        <span className="chat-inbox-unread-count" style={{ marginLeft: 'auto', fontSize: '0.65rem', padding: '0.1rem 0.45rem', borderRadius: '10px' }}>
+                          {unreadChatsCount}
+                        </span>
+                      )}
                     </li>
                     <li className={`sidebar-item ${currentPage === 'landlord_contracts' ? 'active' : ''}`} onClick={() => setCurrentPage('landlord_contracts')}>
                       <FileText size={18} /> <span className="sidebar-menu-label">Rental Contracts</span>
@@ -492,6 +766,11 @@ function App() {
                     </li>
                     <li className={`sidebar-item ${currentPage === 'messages' ? 'active' : ''}`} onClick={() => setCurrentPage('messages')}>
                       <MessageSquare size={18} /> <span className="sidebar-menu-label">Messages</span>
+                      {unreadChatsCount > 0 && (
+                        <span className="chat-inbox-unread-count" style={{ marginLeft: 'auto', fontSize: '0.65rem', padding: '0.1rem 0.45rem', borderRadius: '10px' }}>
+                          {unreadChatsCount}
+                        </span>
+                      )}
                     </li>
                     <li className={`sidebar-item ${currentPage === 'contract' ? 'active' : ''}`} onClick={() => setCurrentPage('contract')}>
                       <FileText size={18} /> <span className="sidebar-menu-label">Rental Contracts</span>
@@ -530,9 +809,20 @@ function App() {
           </aside>
 
           <main className={`portal-content-pane ${currentPage === 'messages' ? 'no-scroll' : ''}`}>
-            {/* Admin Portal Content */}
-            {(currentUser.role.includes('Admin') || currentUser.role.includes('Staff')) && 
-             ['dashboard', 'admin_users', 'admin_properties', 'admin_verification', 'admin_bookings', 'admin_contracts', 'admin_payments', 'admin_reviews', 'admin_reports', 'admin_analytics', 'admin_notifications', 'admin_content', 'admin_settings', 'admin_security', 'admin_audit', 'admin_backup', 'admin_profile'].includes(currentPage) ? (
+            {/* Robust Portal Content Router (Clean page separation) */}
+            {currentPage === 'messages' ? (
+              <Messaging 
+                chats={userChats}
+                activeChatId={activeChatId}
+                setActiveChatId={setActiveChatId}
+                onSendMessage={sendChatMessage}
+                onMarkAsRead={markChatAsRead}
+                listings={listings}
+                savedPropertyIds={savedPropertyIds}
+                userBookedPropertyIds={userBookedPropertyIds}
+                currentUser={currentUser}
+              />
+            ) : isAdminUser ? (
               <AdminPanel 
                 currentUser={currentUser} 
                 activeTab={currentPage}
@@ -542,7 +832,7 @@ function App() {
                 onDeleteListing={deleteListing}
                 onSaveSettings={handleSaveSettings}
               />
-            ) : ['dashboard', 'landlord_properties', 'landlord_add_property', 'landlord_bookings', 'landlord_tenants', 'landlord_contracts', 'landlord_payments', 'landlord_reviews', 'landlord_analytics', 'landlord_notifications', 'landlord_profile'].includes(currentPage) && currentUser.role.includes('Landlord') ? (
+            ) : isLandlordUser ? (
               <Dashboard 
                 listings={listings} 
                 onAddListing={addListing} 
@@ -554,8 +844,59 @@ function App() {
                 onSaveSettings={handleSaveSettings}
                 payments={sharedPayments}
                 onApprovePayment={approveSharedPayment}
+                chats={userChats}
+                notifications={notifications}
+                onStartChat={startChat}
               />
-            ) : ['dashboard', 'student_bookings', 'student_payments', 'student_reviews', 'student_notifications', 'student_profile', 'help'].includes(currentPage) ? (
+            ) : (currentPage === 'contract' || currentPage === 'contracts' || currentPage === 'rental_contracts') ? (
+              <ContractBuilder currentUser={currentUser} />
+            ) : currentPage === 'settings' ? (
+              <SettingsPage currentUser={currentUser} onSave={handleSaveSettings} />
+            ) : currentPage === 'saved' ? (
+              <div>
+                <div style={{ borderBottom: '1px solid var(--border-light)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+                  <h2 style={{ fontSize: '1.75rem', fontWeight: '800' }}>Saved Properties ❤️</h2>
+                  <p style={{ color: 'var(--text-muted)' }}>Properties you bookmarked to review, compare, or share with potential roommates.</p>
+                </div>
+
+                {listings.filter(l => (savedPropertyIds || []).includes(l.id)).length === 0 ? (
+                  <div className="glass-panel" style={{ padding: '3rem', background: 'white', border: '1px solid var(--border-light)', textAlign: 'center', borderRadius: 'var(--radius-lg)' }}>
+                    <Heart size={48} style={{ color: 'var(--text-light)', marginBottom: '1rem' }} />
+                    <h3 style={{ fontSize: '1.25rem', fontWeight: '700' }}>No Saved Listings Yet</h3>
+                    <p style={{ color: 'var(--text-muted)', marginTop: '0.25rem', marginBottom: '1.25rem' }}>Browse properties and hit the heart icon on any listing card to save it here.</p>
+                    <button className="btn-filter-apply" onClick={() => setCurrentPage('listings')}>
+                      Explore Housing Listings
+                    </button>
+                  </div>
+                ) : (
+                  <div className="listings-grid">
+                    {listings.filter(l => (savedPropertyIds || []).includes(l.id)).map(listing => (
+                      <div key={listing.id} className="listing-card">
+                        <div className="listing-image-wrapper">
+                          <img src={listing.image} alt={listing.title} className="listing-card-image" />
+                          <button 
+                            type="button" 
+                            style={{ position: 'absolute', top: '8px', right: '8px', background: '#ef4444', border: 'none', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 3 }}
+                            onClick={() => toggleSaveProperty(listing.id)}
+                            title="Remove from saved"
+                          >
+                            <Heart size={16} fill="white" color="white" />
+                          </button>
+                          <span className="badge badge-price">৳{listing.price.toLocaleString()} BDT/mo</span>
+                        </div>
+                        <div className="listing-info">
+                          <h3 className="listing-title">{listing.title}</h3>
+                          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '0.75rem' }}>{listing.location}</p>
+                          <button className="btn-card-action" onClick={() => { setSelectedListing(listing); setCurrentPage('listings'); }}>
+                            View Property Details
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
               <StudentDashboard 
                 currentUser={currentUser} 
                 activeTab={currentPage}
@@ -564,29 +905,12 @@ function App() {
                 onSaveSettings={handleSaveSettings}
                 payments={sharedPayments}
                 onAddPayment={addSharedPayment}
-              />
-            ) : null}
-            {currentPage === 'messages' && (
-              <Messaging 
-                chats={chats}
-                activeChatId={activeChatId}
-                setActiveChatId={setActiveChatId}
-                onSendMessage={sendChatMessage}
+                savedPropertyIds={savedPropertyIds}
+                userBookedPropertyIds={userBookedPropertyIds}
                 listings={listings}
+                chats={chats}
+                notifications={notifications}
               />
-            )}
-            {currentPage === 'contract' && (
-              <ContractBuilder currentUser={currentUser} />
-            )}
-            {currentPage === 'saved' && (
-              <div className="glass-panel" style={{ padding: '3rem', background: 'white', border: '1px solid var(--border-light)', textAlign: 'center' }}>
-                <Heart size={48} style={{ color: 'var(--text-light)', marginBottom: '1rem' }} />
-                <h3>No Saved Listings Yet</h3>
-                <p style={{ color: 'var(--text-muted)', marginTop: '0.25rem' }}>Browse properties and hit the heart icon to save them here.</p>
-              </div>
-            )}
-            {currentPage === 'settings' && (
-              <SettingsPage currentUser={currentUser} onSave={handleSaveSettings} />
             )}
           </main>
         </div>
@@ -613,8 +937,12 @@ function App() {
               listings={listings} 
               selectedListing={selectedListing}
               setSelectedListing={setSelectedListing}
+              savedPropertyIds={savedPropertyIds}
+              onToggleSave={toggleSaveProperty}
+              onRecordBooking={recordPropertyBooking}
               onStartChat={startChat}
               onSubmitReview={addReview}
+              reviews={reviews}
             />
           )}
 
@@ -635,9 +963,21 @@ function App() {
               <h3 style={{ fontSize: '1.25rem', fontWeight: '800' }}>RentEase</h3>
               <p>Simplifying student living through smart roommate matching and seamless verified housing listings.</p>
               <div className="social-icons-row">
-                <a href="#" className="social-icon-btn">@</a>
-                <a href="#" className="social-icon-btn">#</a>
-                <a href="#" className="social-icon-btn">$</a>
+                <a href="https://facebook.com" target="_blank" rel="noopener noreferrer" className="social-icon-btn" title="Facebook">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                  </svg>
+                </a>
+                <a href="https://linkedin.com" target="_blank" rel="noopener noreferrer" className="social-icon-btn" title="LinkedIn">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.88 8.56a1.68 1.68 0 0 0 1.68-1.68c0-.93-.75-1.69-1.68-1.69a1.69 1.69 0 0 0-1.69 1.69c0 .93.76 1.68 1.69 1.68m1.39 9.94v-8.37H5.5v8.37h2.77z"/>
+                  </svg>
+                </a>
+                <a href="https://youtube.com" target="_blank" rel="noopener noreferrer" className="social-icon-btn" title="YouTube">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                  </svg>
+                </a>
               </div>
             </div>
             
@@ -662,7 +1002,16 @@ function App() {
 
             <div className="main-footer-links-col">
               <h4>Stay Connected</h4>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Subscribe to campus listings and housing availability alerts.</p>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>Subscribe to campus listings and housing availability alerts.</p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.85rem' }}>
+                <a href="mailto:renteasy.web@gmail.com" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-main)', textDecoration: 'none', fontWeight: '600' }}>
+                  <Mail size={15} style={{ color: 'var(--primary)' }} /> renteasy.web@gmail.com
+                </a>
+                <a href="tel:01828384972" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-main)', textDecoration: 'none', fontWeight: '600' }}>
+                  <Phone size={15} style={{ color: 'var(--primary)' }} /> +880 1828-384972
+                </a>
+              </div>
             </div>
           </div>
           <div className="main-footer-credits">

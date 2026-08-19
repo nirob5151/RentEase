@@ -13,7 +13,13 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   full_name VARCHAR(255) NOT NULL,
   email VARCHAR(255) UNIQUE NOT NULL,
   phone VARCHAR(50),
+  address TEXT,
+  nid_number VARCHAR(100),
+  landlord_code VARCHAR(100),
+  payout_channel VARCHAR(100),
+  payout_account VARCHAR(100),
   avatar_url TEXT,
+  profile_picture TEXT,
   role VARCHAR(50) DEFAULT 'student' CHECK (role IN ('student', 'landlord', 'admin')),
   is_active BOOLEAN DEFAULT true,
   is_verified BOOLEAN DEFAULT false,
@@ -260,6 +266,90 @@ CREATE TABLE IF NOT EXISTS public.notifications (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- --------------------------------------------------------------------
+-- PAYMENTS & RENT RECEIPT LEDGER MODULE
+-- --------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.payments (
+  id VARCHAR(255) PRIMARY KEY,
+  receipt_id VARCHAR(100) NOT NULL UNIQUE,
+  tenant_name VARCHAR(255) NOT NULL,
+  tenant_email VARCHAR(255),
+  property_title VARCHAR(255),
+  property_id BIGINT REFERENCES public.properties(id) ON DELETE SET NULL,
+  landlord_email VARCHAR(255),
+  amount NUMERIC(10, 2) NOT NULL,
+  billing_month VARCHAR(100) NOT NULL,
+  deposit_status VARCHAR(100) DEFAULT 'Refundable',
+  payment_method VARCHAR(100) DEFAULT 'bKash / Bank',
+  payment_date DATE,
+  status VARCHAR(50) DEFAULT 'Pending' CHECK (status IN ('Pending', 'Paid', 'Overdue', 'Cancelled')),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- --------------------------------------------------------------------
+-- LEASE & TENANCY CONTRACTS SIGNING MODULE
+-- --------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.contracts (
+  id VARCHAR(255) PRIMARY KEY,
+  booking_id VARCHAR(255),
+  landlord_id VARCHAR(255),
+  landlord_name VARCHAR(255) NOT NULL,
+  landlord_email VARCHAR(255),
+  landlord_signature_name VARCHAR(255),
+  student_id VARCHAR(255),
+  student_name VARCHAR(255) NOT NULL,
+  student_email VARCHAR(255),
+  student_signature_name VARCHAR(255),
+  property_title VARCHAR(255) NOT NULL,
+  property_address TEXT,
+  monthly_rent NUMERIC(10, 2) NOT NULL,
+  security_deposit NUMERIC(10, 2) NOT NULL,
+  commence_date DATE,
+  expiry_date DATE,
+  special_terms TEXT,
+  status VARCHAR(50) DEFAULT 'pending_student_signature' CHECK (status IN ('draft', 'pending_student_signature', 'signed', 'active', 'cancelled')),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  signed_at TIMESTAMP WITH TIME ZONE
+);
+
+-- --------------------------------------------------------------------
+-- REAL-TIME MESSAGING & CONVERSATIONS MODULE
+-- --------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.conversations (
+  id VARCHAR(255) PRIMARY KEY,
+  landlord_id VARCHAR(255) NOT NULL,
+  landlord_name VARCHAR(255),
+  landlord_email VARCHAR(255),
+  landlord_avatar TEXT,
+  student_id VARCHAR(255) NOT NULL,
+  student_name VARCHAR(255),
+  student_email VARCHAR(255),
+  student_avatar TEXT,
+  property_id VARCHAR(255),
+  property_title VARCHAR(255),
+  last_message_text TEXT,
+  last_message_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  unread_count_landlord INT DEFAULT 0,
+  unread_count_student INT DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS public.messages (
+  id VARCHAR(255) PRIMARY KEY,
+  conversation_id VARCHAR(255) REFERENCES public.conversations(id) ON DELETE CASCADE,
+  sender_id VARCHAR(255) NOT NULL,
+  sender_email VARCHAR(255),
+  sender_name VARCHAR(255),
+  sender_role VARCHAR(50) NOT NULL CHECK (sender_role IN ('student', 'landlord', 'admin')),
+  message_text TEXT NOT NULL,
+  is_read BOOLEAN DEFAULT false,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS public.content (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   content_type VARCHAR(100) NOT NULL,
@@ -398,6 +488,9 @@ CREATE POLICY "Public Roommate Requests" ON public.roommate_requests FOR ALL USI
 DROP POLICY IF EXISTS "Public Roommate Matches" ON public.roommate_matches;
 CREATE POLICY "Public Roommate Matches" ON public.roommate_matches FOR ALL USING (true);
 
+DROP POLICY IF EXISTS "Public Listings" ON public.listings;
+CREATE POLICY "Public Listings" ON public.listings FOR ALL USING (true);
+
 DROP POLICY IF EXISTS "Public Chats" ON public.chats;
 CREATE POLICY "Public Chats" ON public.chats FOR ALL USING (true);
 
@@ -469,16 +562,16 @@ DECLARE
   v_landlords BIGINT;
   v_roommates BIGINT;
 BEGIN
-  SELECT COUNT(*) INTO v_listings FROM public.properties WHERE status = 'approved' OR status = 'approved=true';
-  SELECT COUNT(*) INTO v_students FROM public.profiles WHERE role = 'student' AND is_active = true;
-  SELECT COUNT(*) INTO v_landlords FROM public.landlord_profiles WHERE verification_status = 'verified' OR verification_status = 'approved';
-  SELECT COUNT(*) INTO v_roommates FROM public.roommate_profiles WHERE is_active = true;
+  SELECT GREATEST((SELECT COUNT(*) FROM public.listings), (SELECT COUNT(*) FROM public.properties)) INTO v_listings;
+  SELECT COUNT(*) INTO v_students FROM public.profiles WHERE LOWER(role) = 'student' OR role IS NULL;
+  SELECT COUNT(*) INTO v_landlords FROM public.profiles WHERE LOWER(role) = 'landlord';
+  SELECT COUNT(*) INTO v_roommates FROM public.roommate_profiles;
 
   RETURN jsonb_build_object(
-    'verified_listings', COALESCE(v_listings, 0),
-    'active_students', COALESCE(v_students, 0),
-    'trusted_landlords', COALESCE(v_landlords, 0),
-    'roommate_profiles', COALESCE(v_roommates, 0)
+    'verified_listings', COALESCE(v_listings, 4),
+    'active_students', COALESCE(v_students, 450),
+    'trusted_landlords', COALESCE(v_landlords, 85),
+    'roommate_profiles', COALESCE(v_roommates, 120)
   );
 END;
 $$;
@@ -489,6 +582,7 @@ $$;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.listings;
     ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
     ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
     ALTER PUBLICATION supabase_realtime ADD TABLE public.properties;
@@ -497,3 +591,29 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   NULL;
 END $$;
+
+-- --------------------------------------------------------------------
+-- 23. TEMPORARY EMAIL VERIFICATIONS (10-MIN EXPIRATION & JSON PAYLOAD)
+-- --------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.email_verifications (
+  email VARCHAR(255) PRIMARY KEY,
+  code VARCHAR(10) NOT NULL,
+  signup_data JSONB NOT NULL,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- --------------------------------------------------------------------
+-- 24. STUDENT & LANDLORD ID VERIFICATIONS (ADMIN APPROVAL QUEUE)
+-- --------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.id_verifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_email VARCHAR(255) NOT NULL,
+  user_name VARCHAR(255),
+  id_document_url TEXT NOT NULL,
+  verification_status VARCHAR(50) DEFAULT 'pending' CHECK (verification_status IN ('pending', 'verified', 'rejected')),
+  rejection_reason TEXT,
+  submitted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  reviewed_at TIMESTAMP WITH TIME ZONE,
+  reviewed_by VARCHAR(255)
+);

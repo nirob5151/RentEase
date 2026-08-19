@@ -16,6 +16,7 @@ function DatabaseViewer({ isOpen, onClose }) {
   const [payments, setPayments] = useState([]);
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [seedMsg, setSeedMsg] = useState('');
 
   const fetchAllTables = async () => {
     setLoading(true);
@@ -30,6 +31,15 @@ function DatabaseViewer({ isOpen, onClose }) {
     setPayments(pData || []);
     setChats(cData || []);
     setLoading(false);
+  };
+
+  const handleSeedDatabase = async () => {
+    setLoading(true);
+    const res = await dbService.seedAllDatabaseTables();
+    setSeedMsg(res.message);
+    await fetchAllTables();
+    setLoading(false);
+    setTimeout(() => setSeedMsg(''), 4000);
   };
 
   useEffect(() => {

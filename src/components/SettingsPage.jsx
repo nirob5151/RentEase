@@ -4,6 +4,7 @@ import {
   Bell, CreditCard, Lock, Settings, Phone, MapPin, 
   Landmark, DollarSign, FileText, Info, Globe 
 } from 'lucide-react';
+import { dbService } from '../database/supabaseClient';
 
 function SettingsPage({ currentUser, onSave }) {
   const isLandlord = currentUser?.role?.includes('Landlord');
@@ -106,17 +107,45 @@ function SettingsPage({ currentUser, onSave }) {
     setTimeout(() => setShowSuccess(false), 3000);
   };
 
-  const handleLandlordSave = (e) => {
+  const handleLandlordSave = async (e) => {
     if (e) e.preventDefault();
 
-    // Check password matching if new password is typed
-    if (newPassword) {
-      if (newPassword !== confirmPassword) {
-        alert('New passwords do not match!');
+    // Check password matching & backend verification if new password is typed
+    if (newPassword || currentPassword) {
+      if (!currentPassword) {
+        alert('❌ Please enter your current password to change it.');
         return;
       }
-      if (currentPassword === '') {
-        alert('Please enter your current password to change it.');
+      if (!newPassword) {
+        alert('❌ Please enter your new password.');
+        return;
+      }
+      if (!confirmPassword) {
+        alert('❌ Please confirm your new password.');
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        alert('❌ New passwords do not match!');
+        return;
+      }
+      if (newPassword.length < 8) {
+        alert('❌ New password must be at least 8 characters long.');
+        return;
+      }
+      if (newPassword === currentPassword) {
+        alert('❌ New password cannot be identical to your current password.');
+        return;
+      }
+
+      try {
+        await dbService.changePassword({
+          userEmail: currentUser?.email,
+          oldPassword: currentPassword,
+          newPassword,
+          confirmPassword
+        });
+      } catch (err) {
+        alert(`❌ Password Error: ${err.message}`);
         return;
       }
     }

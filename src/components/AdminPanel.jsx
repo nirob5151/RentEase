@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { dbService } from '../database/supabaseClient';
+import { getAvatarUrl } from '../utils/profileCompleteness';
 import { 
   Users, Home, ShieldCheck, Calendar, FileText, CreditCard, 
   Star, AlertCircle, BarChart3, Bell, Settings, Lock, 
@@ -87,6 +89,49 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [customAvatarUrl, setCustomAvatarUrl] = useState('');
   const [profileSavedMsg, setProfileSavedMsg] = useState(false);
+
+  // Student & Landlord ID Document Verification Queue State
+  const [pendingIdVerifications, setPendingIdVerifications] = useState([]);
+  const [rejectionModalItem, setRejectionModalItem] = useState(null);
+  const [rejectionReasonInput, setRejectionReasonInput] = useState('');
+
+  const fetchPendingVerifications = () => {
+    dbService.getPendingIdVerifications().then(list => {
+      setPendingIdVerifications(list || []);
+    });
+  };
+
+  useEffect(() => {
+    fetchPendingVerifications();
+  }, []);
+
+  const handleReviewIdAction = async (item, action) => {
+    if (action === 'reject') {
+      setRejectionModalItem(item);
+      setRejectionReasonInput('');
+      return;
+    }
+
+    if (window.confirm(`Are you sure you want to APPROVE ID verification for ${item.user_name} (${item.user_email})?`)) {
+      await dbService.reviewIdVerification(item.id, item.user_email, 'approve');
+      addAuditLog(`Approved ID Verification for: ${item.user_name} (${item.user_email})`);
+      alert(`🎉 ID verification APPROVED for ${item.user_name}! In-App alert and status email dispatched.`);
+      fetchPendingVerifications();
+    }
+  };
+
+  const handleConfirmRejection = async () => {
+    if (!rejectionReasonInput.trim()) {
+      alert('Please enter a rejection reason.');
+      return;
+    }
+    await dbService.reviewIdVerification(rejectionModalItem.id, rejectionModalItem.user_email, 'reject', rejectionReasonInput.trim());
+    addAuditLog(`Rejected ID Verification for: ${rejectionModalItem.user_name} (${rejectionModalItem.user_email}). Reason: ${rejectionReasonInput.trim()}`);
+    alert(`❌ ID verification REJECTED for ${rejectionModalItem.user_name}. Reason & notifications dispatched.`);
+    setRejectionModalItem(null);
+    setRejectionReasonInput('');
+    fetchPendingVerifications();
+  };
 
   const presetAdminAvatars = [
     { label: 'Executive Female', url: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=200&h=200&q=80' },
@@ -771,9 +816,90 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
         </div>
       )}
 
-      {/* 3. PROPERTY VERIFICATION */}
+      {/* 3. PROPERTY & STUDENT ID VERIFICATION QUEUE */}
       {activeTab === 'verification' && (
-        <div className="admin-pane-container">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+          
+          {/* STUDENT & LANDLORD IDENTITY VERIFICATION SUBMISSIONS */}
+          <div className="admin-pane-container">
+            <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: '800' }}>🎓 Student & Landlord ID Verification Submissions</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Review uploaded Student Cards / NID documents, approve verified accounts, or reject invalid uploads.</p>
+              </div>
+
+              <button className="btn-card-secondary" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem' }} onClick={fetchPendingVerifications}>
+                <RefreshCw size={14} /> Refresh Queue
+              </button>
+            </div>
+
+            {pendingIdVerifications.length === 0 ? (
+              <div style={{ padding: '2.5rem', textAlign: 'center', background: '#f8fafc', borderRadius: '8px', border: '1px dashed var(--border-light)' }}>
+                <CheckCircle size={32} style={{ color: 'var(--secondary)', marginBottom: '0.5rem' }} />
+                <h4 style={{ fontWeight: '700' }}>No Pending Student ID Verifications</h4>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>All submitted Student & Landlord ID documents have been reviewed.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {pendingIdVerifications.map(item => (
+                  <div key={item.id} style={{ padding: '1.25rem', background: '#ffffff', border: '1px solid var(--border-light)', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <img 
+                        src={getAvatarUrl({ name: item.user_name, avatar: item.avatar || item.avatar_url || item.profile_picture })} 
+                        alt="Student Profile" 
+                        style={{ width: '48px', height: '48px', borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--primary)' }}
+                        onError={(e) => {
+                          e.target.onerror = null;
+                          e.target.src = getAvatarUrl({ name: item.user_name });
+                        }}
+                      />
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <h4 style={{ fontWeight: '800', fontSize: '1rem' }}>{item.user_name}</h4>
+                          <span className="admin-badge-pill" style={{ background: '#fef3c7', color: '#b45309' }}>Pending Review</span>
+                        </div>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Email: <strong>{item.user_email}</strong></p>
+                        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Submitted: {item.submitted_at ? new Date(item.submitted_at).toLocaleString() : 'Recently'}</p>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      {item.id_document_url && (
+                        <a 
+                          href={item.id_document_url} 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          className="btn-card-secondary"
+                          style={{ background: '#eff6ff', color: '#1e40af', border: '1px solid #bfdbfe', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', textDecoration: 'none' }}
+                        >
+                          <Eye size={14} /> View ID Document
+                        </a>
+                      )}
+
+                      <button 
+                        className="btn-filter-apply" 
+                        style={{ background: 'var(--secondary)', fontSize: '0.8rem', padding: '0.4rem 0.85rem' }} 
+                        onClick={() => handleReviewIdAction(item, 'approve')}
+                      >
+                        Approve
+                      </button>
+
+                      <button 
+                        className="btn-card-secondary" 
+                        style={{ border: '1px solid var(--danger)', color: 'var(--danger)', fontSize: '0.8rem', padding: '0.4rem 0.85rem' }} 
+                        onClick={() => handleReviewIdAction(item, 'reject')}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* PROPERTY VERIFICATION QUEUE */}
+          <div className="admin-pane-container">
           <div style={{ marginBottom: '2rem' }}>
             <h3 style={{ fontSize: '1.25rem', fontWeight: '800' }}>Property Verification Queue</h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Verify landlords property deeds and utility documentation uploads before making them public.</p>
@@ -828,6 +954,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
               ))
             )}
           </div>
+        </div>
         </div>
       )}
 
@@ -2165,6 +2292,42 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
         </div>
       )}
 
+      {/* Rejection Reason Modal */}
+      {rejectionModalItem && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
+          <div style={{ background: 'white', borderRadius: '12px', padding: '1.75rem', width: '100%', maxWidth: '450px', display: 'flex', flexDirection: 'column', gap: '1rem', boxShadow: 'var(--shadow-xl)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--danger)' }}>Reject ID Verification</h3>
+              <button style={{ background: 'none', border: 'none', cursor: 'pointer' }} onClick={() => setRejectionModalItem(null)}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+              Enter the reason for rejecting <strong>{rejectionModalItem.user_name}</strong>'s ID verification submission:
+            </p>
+
+            <textarea 
+              className="settings-textarea"
+              rows={4}
+              placeholder="e.g. ID card photo is blurry / expired document / student ID name does not match profile name..."
+              value={rejectionReasonInput}
+              onChange={(e) => setRejectionReasonInput(e.target.value)}
+              style={{ width: '100%', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-light)', fontSize: '0.88rem' }}
+            />
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.5rem' }}>
+              <button className="btn-card-secondary" style={{ border: '1px solid var(--border-light)' }} onClick={() => setRejectionModalItem(null)}>
+                Cancel
+              </button>
+
+              <button className="btn-filter-apply" style={{ background: 'var(--danger)' }} onClick={handleConfirmRejection}>
+                Confirm Rejection & Send Notifications
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1322,29 +1322,7 @@ export const dbService = {
     return this.uploadStorageFile('lease-documents', fileName, file);
   },
 
-  // ====================================================
-  // REALTIME HOMEPAGE STATS AGGREGATOR
-  // ====================================================
-  async getRentEaseStats() {
-    if (isConfigured) {
-      try {
-        const { data, error } = await supabase.rpc('get_rentease_stats');
-        if (!error && data) return data;
-      } catch (err) {
-        console.warn('RPC get_rentease_stats error:', err);
-      }
-    }
-    const listings = await this.getListings();
-    const users = await this.getUsers();
-    const roommates = await this.getRoommates();
 
-    return {
-      verified_listings: (listings || []).filter(p => p.verified !== false).length,
-      active_students: (users || []).filter(u => !u.role || u.role === 'student').length || 450,
-      trusted_landlords: (users || []).filter(u => u.role === 'landlord').length || 85,
-      roommate_profiles: (roommates || []).length || 120
-    };
-  },
 
   // ====================================================
   // AUTOMATED DATABASE SEEDING UTILITY

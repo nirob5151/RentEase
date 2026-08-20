@@ -44,61 +44,114 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
     fetchLiveParticipantData();
   }, [chats]);
 
-  // Helper to dynamically resolve live avatar from Supabase profiles database
+  const DEFAULT_AVATAR = 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80';
+
+  // Helper to dynamically resolve live avatar from Supabase profiles database.
+  // Uses the SAME explicit sender/recipient identity resolution as getChatPartnerName
+  // (see the detailed comment there) so the avatar shown always matches the name shown,
+  // even for stale conversation records where id/email don't cleanly match either side.
   const getLiveAvatar = (chat) => {
-    if (!chat) return 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80';
-    
-    const contactEmail = (
-      (chat.landlord_email && chat.landlord_email !== currentUser?.email ? chat.landlord_email : '') ||
-      (chat.student_email && chat.student_email !== currentUser?.email ? chat.student_email : '') ||
-      (chat.recipient_email && chat.recipient_email !== currentUser?.email ? chat.recipient_email : '') ||
-      (chat.sender_email && chat.sender_email !== currentUser?.email ? chat.sender_email : '') ||
-      chat.email || ''
-    ).toLowerCase().trim();
+    if (!chat) return DEFAULT_AVATAR;
+    if (!currentUser) return chat.avatar || chat.image || DEFAULT_AVATAR;
+
+    const currentEmail = (currentUser.email || '').toLowerCase().trim();
+    const currentId = (currentUser.id || '').toString().trim();
+    const currentName = (currentUser.name || '').toLowerCase().trim();
+
+    const senderEmail = (chat.sender_email || chat.student_email || chat.senderEmail || '').toLowerCase().trim();
+    const senderId = (chat.sender_id || chat.student_id || chat.senderId || '').toString().trim();
+    const senderName = chat.sender_name || chat.senderName || '';
+
+    const recipientEmail = (chat.recipient_email || chat.landlord_email || chat.recipientEmail || '').toLowerCase().trim();
+    const recipientId = (chat.recipient_id || chat.landlord_id || chat.recipientId || '').toString().trim();
+    const recipientName = chat.recipient_name || chat.recipientName || '';
+
+    const isMe = (idVal, emailVal) =>
+      (!!currentId && !!idVal && idVal === currentId) ||
+      (!!currentEmail && !!emailVal && emailVal === currentEmail);
+
+    const iAmSender = isMe(senderId, senderEmail);
+    const iAmRecipient = isMe(recipientId, recipientEmail);
+
+    const resolveFor = (email, id) =>
+      (email && liveAvatars[email]) || (id && liveAvatars[id]) || null;
+
+    if (iAmSender && !iAmRecipient) {
+      return resolveFor(recipientEmail, recipientId) || chat.avatar || chat.image || DEFAULT_AVATAR;
+    }
+    if (iAmRecipient && !iAmSender) {
+      return resolveFor(senderEmail, senderId) || chat.avatar || chat.image || DEFAULT_AVATAR;
+    }
+
+    // Ambiguous / stale data: fall back to name comparison, same as getChatPartnerName
+    const senderIsMe = senderName && senderName.toLowerCase().trim() === currentName;
+    const recipientIsMe = recipientName && recipientName.toLowerCase().trim() === currentName;
+
+    if (senderIsMe) return resolveFor(recipientEmail, recipientId) || chat.avatar || chat.image || DEFAULT_AVATAR;
+    if (recipientIsMe) return resolveFor(senderEmail, senderId) || chat.avatar || chat.image || DEFAULT_AVATAR;
 
     const contactName = (chat.name || '').toLowerCase().trim();
+    if (contactName && liveAvatars[contactName]) return liveAvatars[contactName];
 
-    if (contactEmail && liveAvatars[contactEmail]) {
-      return liveAvatars[contactEmail];
-    }
-    if (contactName && liveAvatars[contactName]) {
-      return liveAvatars[contactName];
-    }
-
-    if (currentUser && ((currentUser.name && currentUser.name.toLowerCase().trim() === contactName) || (currentUser.email && currentUser.email.toLowerCase().trim() === contactEmail))) {
-      return currentUser.avatar || currentUser.avatar_url || currentUser.profile_picture;
-    }
-
-    return chat.avatar || chat.image || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80';
+    return chat.avatar || chat.image || DEFAULT_AVATAR;
   };
 
-  // Helper to dynamically resolve the chat partner display name relative to the logged-in user
+  // Helper to dynamically resolve the chat partner display name relative to the logged-in user.
+  // IMPORTANT: this must NEVER fall back to "assume I'm the sender" — with stale/legacy
+  // conversation records (created under an old email, or with landlord_*/student_* aliasing),
+  // that assumption can silently show the current user their OWN name instead of the other
+  // party's. Instead we explicitly detect which side (if any) matches the current user, and
+  // only pick the "other" side once we're sure who "I" am. If identity can't be resolved by
+  // id/email at all (stale data), we fall back to comparing NAMES so we still never echo the
+  // viewer's own name back to them.
   const getChatPartnerName = (chat) => {
     if (!chat || !currentUser) return chat?.name || 'Contact';
 
     const currentEmail = (currentUser.email || '').toLowerCase().trim();
-    const currentId = (currentUser.id || '').toString();
+    const currentId = (currentUser.id || '').toString().trim();
+    const currentName = (currentUser.name || '').toLowerCase().trim();
 
     const senderEmail = (chat.sender_email || chat.student_email || chat.senderEmail || '').toLowerCase().trim();
-    const senderId = (chat.sender_id || chat.student_id || chat.senderId || '').toString();
+    const senderId = (chat.sender_id || chat.student_id || chat.senderId || '').toString().trim();
+    const senderName = chat.sender_name || chat.senderName || '';
 
     const recipientEmail = (chat.recipient_email || chat.landlord_email || chat.recipientEmail || '').toLowerCase().trim();
-    const recipientId = (chat.recipient_id || chat.landlord_id || chat.recipientId || '').toString();
+    const recipientId = (chat.recipient_id || chat.landlord_id || chat.recipientId || '').toString().trim();
+    const recipientName = chat.recipient_name || chat.recipientName || '';
 
-    // If logged-in user is recipient (or matches recipient email/id), display SENDER's name
-    if ((currentEmail && recipientEmail === currentEmail) || (currentId && recipientId === currentId)) {
-      if (chat.sender_name || chat.senderName) return chat.sender_name || chat.senderName;
+    const isMe = (idVal, emailVal) =>
+      (!!currentId && !!idVal && idVal === currentId) ||
+      (!!currentEmail && !!emailVal && emailVal === currentEmail);
+
+    const iAmSender = isMe(senderId, senderEmail);
+    const iAmRecipient = isMe(recipientId, recipientEmail);
+
+    // Clearly the sender -> show the recipient (the other party)
+    if (iAmSender && !iAmRecipient) {
+      if (recipientName) return recipientName;
+      if (recipientEmail && liveNames[recipientEmail]) return liveNames[recipientEmail];
+      if (recipientId && liveNames[recipientId]) return liveNames[recipientId];
+      return chat.name || 'Contact';
+    }
+
+    // Clearly the recipient -> show the sender (the other party)
+    if (iAmRecipient && !iAmSender) {
+      if (senderName) return senderName;
       if (senderEmail && liveNames[senderEmail]) return liveNames[senderEmail];
       if (senderId && liveNames[senderId]) return liveNames[senderId];
       return 'Contact';
     }
 
-    // If logged-in user is sender, display RECIPIENT's name
-    if (chat.recipient_name || chat.recipientName) return chat.recipient_name || chat.recipientName;
-    if (recipientEmail && liveNames[recipientEmail]) return liveNames[recipientEmail];
-    if (recipientId && liveNames[recipientId]) return liveNames[recipientId];
+    // Ambiguous / stale data: neither id nor email matched cleanly (e.g. this
+    // conversation was created under an old/duplicate account email). As a last
+    // resort, compare NAMES so we still never show the viewer their own name.
+    const senderIsMe = senderName && senderName.toLowerCase().trim() === currentName;
+    const recipientIsMe = recipientName && recipientName.toLowerCase().trim() === currentName;
 
-    return chat.name || 'Contact';
+    if (senderIsMe && recipientName) return recipientName;
+    if (recipientIsMe && senderName) return senderName;
+
+    return recipientName || senderName || chat.name || 'Contact';
   };
 
   const activeChat = (chats || []).find(c => c.id === activeChatId) || (chats || [])[0];
@@ -131,7 +184,7 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
     const file = e.target.files[0];
     if (!file || !activeChat) return;
     const localUrl = URL.createObjectURL(file);
-    
+
     const newMsg = {
       sender: 'sender',
       text: 'Sent an image attachment',
@@ -183,8 +236,8 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
     setTypedMessage('');
   };
 
-  const filteredChats = (chats || []).filter(c => 
-    (getChatPartnerName(c) || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
+  const filteredChats = (chats || []).filter(c =>
+    (getChatPartnerName(c) || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     (c.snippet || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -221,9 +274,9 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
           <h2 style={{ fontSize: '1.25rem', fontWeight: '800' }}>Messages ({chats.length})</h2>
           <div className="chat-inbox-search-box">
             <Search size={16} />
-            <input 
-              type="text" 
-              placeholder="Search conversations..." 
+            <input
+              type="text"
+              placeholder="Search conversations..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -232,8 +285,8 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
 
         <div className="chat-inbox-list">
           {filteredChats.map(c => (
-            <div 
-              key={c.id} 
+            <div
+              key={c.id}
               className={`chat-inbox-item ${activeChat?.id === c.id ? 'active' : ''}`}
               onClick={() => setActiveChatId(c.id)}
             >
@@ -300,7 +353,7 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
               const msgSenderId = (msg.senderId || msg.sender_id || '').toString();
               const msgSenderEmail = (msg.senderEmail || msg.sender_email || '').toLowerCase().trim();
               const msgSenderRole = (msg.senderRole || msg.sender_role || '').toLowerCase();
-              
+
               const userRoleLower = (currentUser?.role || '').toLowerCase();
               const isUserLandlord = userRoleLower.includes('landlord');
               const isUserStudent = !userRoleLower.includes('admin') && !isUserLandlord;
@@ -370,9 +423,9 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
                     const tagLabel = isBooked ? 'Booked Property' : (isSaved ? 'Saved Listing' : item.type);
 
                     return (
-                      <div 
-                        key={item.id} 
-                        style={{ display: 'flex', gap: '0.75rem', padding: '0.5rem', cursor: 'pointer', borderRadius: '6px', background: '#f8fafc', border: '1px solid var(--border-light)', transition: 'background 0.2s' }} 
+                      <div
+                        key={item.id}
+                        style={{ display: 'flex', gap: '0.75rem', padding: '0.5rem', cursor: 'pointer', borderRadius: '6px', background: '#f8fafc', border: '1px solid var(--border-light)', transition: 'background 0.2s' }}
                         onClick={() => handleShareProperty(item)}
                         onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
                         onMouseLeave={(e) => e.currentTarget.style.background = '#f8fafc'}
@@ -397,12 +450,12 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
 
           {/* Input box */}
           <form className="chat-reply-panel" onSubmit={handleSend}>
-            <input 
-              type="file" 
-              id="chat-image-input" 
-              accept="image/*" 
-              style={{ display: 'none' }} 
-              onChange={handleImageUpload} 
+            <input
+              type="file"
+              id="chat-image-input"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={handleImageUpload}
             />
             <button type="button" className="chat-tool-btn" onClick={() => document.getElementById('chat-image-input').click()}>
               <Image size={20} />
@@ -411,9 +464,9 @@ function Messaging({ chats = [], activeChatId, setActiveChatId, onSendMessage, o
               <Home size={20} />
             </button>
             <div className="chat-reply-input-box">
-              <input 
-                type="text" 
-                placeholder="Type a message..." 
+              <input
+                type="text"
+                placeholder="Type a message..."
                 value={typedMessage}
                 onChange={(e) => setTypedMessage(e.target.value)}
               />

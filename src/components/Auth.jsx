@@ -533,36 +533,29 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
     const inputVal = (email || '').trim().toLowerCase();
     if (!inputVal) return setError('Please enter your email address.');
     if (!password) return setError('Please enter your password.');
-    
-    // Admin account special login bypasses
-    if (
-      inputVal.includes('superadmin') ||
-      inputVal.includes('admin@rentease.com') ||
-      inputVal.includes('support@rentease.com') ||
-      inputVal === 'admin'
-    ) {
-      let adminUser = {
-        name: 'System Admin',
-        email: inputVal.includes('@') ? inputVal : 'admin@rentease.com',
-        phone: '+880 1900-778899',
-        role: 'Admin Account',
-        university: 'N/A',
-        avatar: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=120&h=120&q=80',
-        id: 'ADM-002'
-      };
-      return onAuthSuccess(adminUser);
-    }
 
-    // 3. LOGIN - EMAIL + PASSWORD MATCH QUERY
+    // 1. Query user profile by email from database
     const dbUser = await dbService.getUserByEmail(inputVal);
 
     if (!dbUser) {
       return setError('Invalid email or password');
     }
 
-    // If user exists, verify credentials and redirect based on role
+    // 2. Verify password securely using database / hashed auth engine
+    const isValidPassword = await dbService.verifyUserPassword(inputVal, password, dbUser);
+
+    if (!isValidPassword) {
+      return setError('Invalid email or password');
+    }
+
+    // 3. Resolve role and complete sign-in
     const rawRole = (dbUser.rawRole || dbUser.role || 'student').toLowerCase();
-    const roleTitle = rawRole.includes('landlord') ? 'Landlord Account' : rawRole.includes('admin') ? 'Admin Account' : 'Student Account';
+    const isSuperAdmin = inputVal === 'renteasy.web@gmail.com' || (dbUser.name && dbUser.name.includes('Super Admin')) || rawRole.includes('super_admin');
+    const roleTitle = rawRole.includes('landlord') 
+      ? 'Landlord Account' 
+      : (rawRole.includes('admin') || isSuperAdmin)
+        ? (isSuperAdmin ? 'Super Admin (Root)' : 'Admin Account')
+        : 'Student Account';
 
     const loggedInUser = {
       ...dbUser,

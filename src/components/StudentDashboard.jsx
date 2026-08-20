@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { dbService } from '../database/supabaseClient';
 import { checkProfileCompleteness, getAvatarUrl, compressImage } from '../utils/profileCompleteness';
+import { calculateUnreadCount } from '../utils/unreadMessages';
 import { downloadPaymentReceipt } from '../utils/receiptGenerator';
 import { 
   Bell, Heart, MapPin, Search, Users, ArrowRight, MessageSquare, 
@@ -53,7 +54,7 @@ export default function StudentDashboard({
   });
 
   const realBookingsCount = displayBookings.length;
-  const realUnreadMessagesCount = (chats || []).reduce((acc, c) => acc + (Number(c.unread) || 0), 0);
+  const realUnreadMessagesCount = calculateUnreadCount(chats, currentUser);
   const realNotificationsCount = (notifications || []).length;
 
   // 3. Roommate Matches

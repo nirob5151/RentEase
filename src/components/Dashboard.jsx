@@ -1583,10 +1583,10 @@ function Dashboard({ listings, onAddListing, onEditListing, onDeleteListing, cur
             <button className="btn-filter-apply" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={() => {
               const newBilling = {
                 id: 'pay_' + Date.now(),
-                tenantName: prompt('Enter Tenant Name:') || 'New Tenant',
-                propertyTitle: prompt('Enter Property Title:') || 'Mirpur Flat',
-                amount: parseInt(prompt('Enter BDT Amount:') || '5000'),
-                month: prompt('Enter Month (e.g. July 2026):') || 'July 2026',
+                tenantName: window.prompt('Enter Tenant Name:') || 'New Tenant',
+                propertyTitle: window.prompt('Enter Property Title:') || 'Mirpur Flat',
+                amount: parseInt(window.prompt('Enter BDT Amount:') || '5000'),
+                month: window.prompt('Enter Month (e.g. July 2026):') || 'July 2026',
                 status: 'Pending',
                 date: '',
                 receiptId: 'REC-' + Math.floor(10000 + Math.random() * 90000),

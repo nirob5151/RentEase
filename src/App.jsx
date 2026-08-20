@@ -10,11 +10,12 @@ import Auth from './components/Auth';
 import SettingsPage from './components/SettingsPage';
 import AdminPanel from './components/AdminPanel';
 import CustomerCareWidget from './components/CustomerCareWidget';
+import ErrorBoundary from './components/ErrorBoundary';
 import { DEFAULT_LISTINGS, DEFAULT_CHATS } from './database/mockDb';
 import { dbService, isConfigured } from './database/supabaseClient';
 import DatabaseViewer from './components/DatabaseViewer';
-import ErrorBoundary from './components/ErrorBoundary';
 import { getAvatarUrl } from './utils/profileCompleteness';
+import { calculateUnreadCount } from './utils/unreadMessages';
 import { Home as HomeIcon, Search, Users, MessageSquare, FileText, Bell, LogOut, HelpCircle, Heart, Star, Settings, Plus, Calendar, CreditCard, BarChart3, ShieldCheck, AlertCircle, Lock, Database as DatabaseIcon, CheckCircle2, Mail, Phone } from 'lucide-react';
 
 
@@ -438,16 +439,15 @@ function App() {
   const markChatAsRead = (chatId) => {
     if (!chatId) return;
     setChats(prev => prev.map(c => {
-      if (c.id === chatId && (c.unread || 0) > 0) {
-        const updated = { ...c, unread: 0 };
+      if (c.id === chatId) {
+        const updatedMsgs = (c.messages || []).map(m => ({ ...m, isRead: true, is_read: true, read: true }));
+        const updated = { ...c, unread: 0, messages: updatedMsgs };
         dbService.saveChat(updated);
         return updated;
       }
       return c;
     }));
   };
-
-  const unreadChatsCount = (chats || []).reduce((acc, c) => acc + (Number(c.unread) || 0), 0);
 
   const handleLogout = () => {
     setCurrentUser(null);
@@ -511,6 +511,8 @@ function App() {
 
     return false;
   });
+
+  const unreadChatsCount = calculateUnreadCount(userChats, currentUser);
 
   const isPortalPage = Boolean(currentUser) && [
     'dashboard', 'saved', 'student_bookings', 'student_payments',

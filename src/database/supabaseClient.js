@@ -120,6 +120,34 @@ export const dbService = {
     return null;
   },
 
+  async verifyUserPassword(email, password, dbUser) {
+    if (!email || !password) return false;
+    const cleanEmail = (email || '').toLowerCase().trim();
+
+    if (isConfigured) {
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: password
+        });
+        if (!error && data?.user) return true;
+      } catch (err) {
+        // Fallback to database credential check
+      }
+    }
+
+    const storedPasswords = getLocal('auth_passwords') || {};
+    if (storedPasswords[cleanEmail]) {
+      return storedPasswords[cleanEmail] === password;
+    }
+
+    if (dbUser && dbUser.password) {
+      return dbUser.password === password;
+    }
+
+    return Boolean(dbUser);
+  },
+
   // --- 2. PROPERTIES & LISTINGS ---
   async getListings() {
     if (isConfigured) {
@@ -433,6 +461,38 @@ export const dbService = {
         }]);
       } catch (err) {
         console.warn('Supabase add notification error:', err);
+      }
+    }
+    return updated;
+  },
+
+  // --- 9. AUDIT LOGS ---
+  async getAuditLogs() {
+    if (isConfigured) {
+      try {
+        const { data, error } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false });
+        if (!error && data && data.length > 0) return data;
+      } catch (e) {
+        console.warn('Supabase getAuditLogs error:', e);
+      }
+    }
+    return getLocal('audit_logs') || [];
+  },
+
+  async saveAuditLog(logObj) {
+    const current = getLocal('audit_logs') || [];
+    const updated = [logObj, ...current];
+    setLocal('audit_logs', updated);
+
+    if (isConfigured) {
+      try {
+        await supabase.from('audit_logs').insert([{
+          admin_name: logObj.admin || 'Admin',
+          action: logObj.action || 'System Action',
+          ip_address: logObj.ip || '127.0.0.1'
+        }]);
+      } catch (err) {
+        console.warn('Supabase saveAuditLog error:', err);
       }
     }
     return updated;

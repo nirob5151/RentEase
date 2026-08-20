@@ -62,14 +62,10 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
 
   // --- STATE SEEDING & SIMULATIONS ---
   
+  // --- REAL SUPABASE POSTGRESQL STATE ENGINE ---
+  
   // 1. Audit Logs State
-  const [auditLogs, setAuditLogs] = useState([
-    { id: 1, admin: 'Super Admin (Root)', action: 'Suspended Landlord: Abdur Rahman', date: '2026-07-23 09:12 AM', ip: '192.168.1.45' },
-    { id: 2, admin: 'System Admin', action: 'Approved Property: Dhaka Rent', date: '2026-07-22 04:30 PM', ip: '192.168.1.12' },
-    { id: 3, admin: 'Super Admin (Root)', action: 'Changed Roommate Matching rules configuration weights', date: '2026-07-22 10:15 AM', ip: '192.168.1.45' },
-    { id: 4, admin: 'Support Staff', action: 'Resolved Complaint Case #4102', date: '2026-07-21 02:44 PM', ip: '192.168.1.92' },
-    { id: 5, admin: 'System Admin', action: 'Approved Landlord Registration: Mehadi Hasan', date: '2026-07-21 11:20 AM', ip: '10.0.0.12' },
-  ]);
+  const [auditLogs, setAuditLogs] = useState([]);
 
   const addAuditLog = (action) => {
     const newLog = {
@@ -80,6 +76,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
       ip: '192.168.1.' + Math.floor(10 + Math.random() * 90)
     };
     setAuditLogs(prev => [newLog, ...prev]);
+    dbService.saveAuditLog(newLog);
   };
 
   // Admin Profile Edit State
@@ -142,21 +139,58 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
   ];
 
   // 2. User Management state
-  const [users, setUsers] = useState([
-    { id: '22235103412', name: 'Ashikur Rahman', email: 'ashik@cse.bubt.edu.bd', role: 'Student', status: 'Active', identity: 'Verified', university: 'BUBT' },
-    { id: '22235103467', name: 'Anas Ahmed', email: 'anas@cse.bubt.edu.bd', role: 'Student', status: 'Active', identity: 'Verified', university: 'BUBT' },
-    { id: '22235103496', name: 'Nirob Ahmed', email: 'nirob@cse.bubt.edu.bd', role: 'Student', status: 'Active', identity: 'Verified', university: 'BUBT' },
-    { id: 'LND-992813', name: 'Mehadi Hasan', email: 'mehadi@rentease.com', role: 'Landlord', status: 'Active', identity: 'Verified', listings: 3 },
-    { id: 'LND-992011', name: 'Abdur Rahman', email: 'abdur@rentease.com', role: 'Landlord', status: 'Active', identity: 'Pending Approval', listings: 1 },
-    { id: 'LND-881232', name: 'Mrs. Begum', email: 'begum@rentease.com', role: 'Landlord', status: 'Suspended', identity: 'Unverified', listings: 1 },
-  ]);
+  const [users, setUsers] = useState([]);
   const [userSearch, setUserSearch] = useState('');
   const [userFilter, setUserFilter] = useState('All'); // 'All', 'Student', 'Landlord'
+
+  // 3. Property Verification List
+  const [pendingProperties, setPendingProperties] = useState([]);
+
+  // 4. Reports & Complaints (Submitted by Students & Landlords to Admin)
+  const [reports, setReports] = useState([]);
+  const [selectedReport, setSelectedReport] = useState(null);
+  const [reportCategoryFilter, setReportCategoryFilter] = useState('All');
+
+  // 5. Bookings List
+  const [bookings, setBookings] = useState([]);
+
+  // Fetch all live database records on mount
+  useEffect(() => {
+    dbService.getUsers().then(list => {
+      if (Array.isArray(list) && list.length > 0) {
+        const formatted = list.map(u => ({
+          id: u.id,
+          name: u.name || u.full_name || 'User',
+          email: u.email,
+          role: (u.role || 'student').toLowerCase().includes('landlord') ? 'Landlord' : (u.role || 'student').toLowerCase().includes('admin') ? 'Admin' : 'Student',
+          status: 'Active',
+          identity: 'Verified',
+          university: u.university || 'BUBT',
+          created_at: u.created_at || new Date().toISOString()
+        }));
+        setUsers(formatted);
+      } else {
+        setUsers([]);
+      }
+    });
+
+    dbService.getReports().then(reps => {
+      setReports(reps || []);
+    });
+
+    dbService.getAuditLogs().then(logs => {
+      setAuditLogs(logs || []);
+    });
+
+    dbService.getBookings().then(bList => {
+      setBookings(bList || []);
+    });
+  }, []);
 
   const toggleUserStatus = (userIdOrName, name) => {
     const searchTarget = (name || userIdOrName).toLowerCase();
     setUsers(prev => prev.map(u => {
-      if (u.id === userIdOrName || u.name.toLowerCase().includes(searchTarget) || searchTarget.includes(u.name.toLowerCase())) {
+      if (u.id === userIdOrName || (u.name && u.name.toLowerCase().includes(searchTarget)) || searchTarget.includes((u.name || '').toLowerCase())) {
         const nextStatus = u.status === 'Active' ? 'Suspended' : 'Active';
         addAuditLog(`${nextStatus === 'Suspended' ? 'Suspended' : 'Unsuspended'} user Account: ${u.name}`);
         return { ...u, status: nextStatus };
@@ -168,7 +202,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
   const suspendOffenderAccount = (reportedName, reportId) => {
     const searchTarget = reportedName.toLowerCase();
     setUsers(prev => prev.map(u => {
-      if (u.name.toLowerCase().includes(searchTarget) || searchTarget.includes(u.name.toLowerCase()) || u.id === reportedName) {
+      if ((u.name && u.name.toLowerCase().includes(searchTarget)) || searchTarget.includes((u.name || '').toLowerCase()) || u.id === reportedName) {
         addAuditLog(`Admin Action: Suspended Offender Account ${u.name} (Case #${reportId})`);
         return { ...u, status: 'Suspended' };
       }
@@ -196,14 +230,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
     }));
   };
 
-  // 3. Property Verification List
-  const [pendingProperties, setPendingProperties] = useState([
-    { id: 101, title: 'Mirpur 11 Sublet Room', landlord: 'Mrs. Begum', address: 'Mirpur 11, Dhaka', docs: 'Deeds_MrsBegum.pdf', utilityBill: 'Gas_Bill_July2026.jpg', status: 'Pending Review' },
-    { id: 102, title: 'Mirpur 6 Premium Bachelor Suite', landlord: 'Mehadi Hasan', address: 'Mirpur 6, Dhaka', docs: 'Deed_Mehadi_Hasan.pdf', utilityBill: 'Electric_Bill_July.jpg', status: 'Pending Review' }
-  ]);
-
   const verifyPropertyAction = (id, title, action) => {
-    // Approve or reject
     if (action === 'Approve') {
       addAuditLog(`Approved property listing verification: "${title}"`);
       alert(`Property "${title}" approved successfully!`);
@@ -213,17 +240,6 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
     }
     setPendingProperties(prev => prev.filter(p => p.id !== id));
   };
-
-  // 4. Reports & Complaints (Submitted by Students & Landlords to Admin)
-  const [reports, setReports] = useState([
-    { id: 4101, complainantRole: 'Student', reporter: 'Ashikur Rahman', reported: 'Mrs. Begum', targetRole: 'Landlord', reason: 'Poor Property Conditions', description: 'The property lacks generator support though listed and lift works intermittently.', date: '2026-07-22', status: 'Open' },
-    { id: 4102, complainantRole: 'Student', reporter: 'Nirob Ahmed', reported: 'Mrs. Begum', targetRole: 'Landlord', reason: 'Fake Listings', description: 'Listing images of Mirpur 11 room are copied from online hotel directories.', date: '2026-07-21', status: 'Investigating' },
-    { id: 4103, complainantRole: 'Landlord', reporter: 'Mehadi Hasan', reported: 'Sumon Paul', targetRole: 'Student', reason: 'Inappropriate Messages', description: 'Tenant sends inappropriate texts in direct chat logs.', date: '2026-07-19', status: 'Closed' },
-    { id: 4104, complainantRole: 'Student', reporter: 'Anas Ahmed', reported: 'Abdur Rahman', targetRole: 'Landlord', reason: 'Deposit Retention Scam', description: 'Landlord refused to refund security deposit after lease ended with clean inspection.', date: '2026-07-23', status: 'Open' },
-    { id: 4105, complainantRole: 'Landlord', reporter: 'Mehadi Hasan', reported: 'Nirob Ahmed', targetRole: 'Student', reason: 'Property Damages', description: 'Student tenant caused physical damage to air conditioner unit without reporting.', date: '2026-07-20', status: 'Open' }
-  ]);
-  const [selectedReport, setSelectedReport] = useState(null);
-  const [reportCategoryFilter, setReportCategoryFilter] = useState('All'); // 'All', 'Student', 'Landlord'
 
   const resolveReport = (id, action) => {
     setReports(prev => prev.map(r => {
@@ -404,16 +420,56 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
     setBroadcastMsg('');
   };
 
-  // --- ANALYTICS CALCULATIONS ---
-  const totalUsersCount = users.length;
-  const totalStudents = users.filter(u => u.role === 'Student').length;
-  const totalLandlords = users.filter(u => u.role === 'Landlord').length;
+  // --- ANALYTICS CALCULATIONS (REAL LIVE DATABASE DATA) ---
+  const nonAdminUsers = users.filter(u => !(u.role || '').toLowerCase().includes('admin'));
+  const totalUsersCount = nonAdminUsers.length;
+  const totalStudents = nonAdminUsers.filter(u => (u.role || '').toLowerCase().includes('student')).length;
+  const totalLandlords = nonAdminUsers.filter(u => (u.role || '').toLowerCase().includes('landlord')).length;
   const totalListings = listings.length;
-  const activeVerifications = pendingProperties.length;
-  const openReportsCount = reports.filter(r => r.status === 'Open').length;
+  
+  const unverifiedListings = listings.filter(l => l.verified === false).length;
+  const activeVerifications = pendingIdVerifications.length + unverifiedListings + pendingProperties.length;
+  
+  const openReportsCount = reports.filter(r => {
+    const st = (r.status || '').toLowerCase();
+    return st === 'open' || st === 'investigating' || st === 'pending';
+  }).length;
+
   const totalRevenueCollected = payments
     .filter(p => p.status === 'Verified')
-    .reduce((sum, p) => sum + p.amount, 0);
+    .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+  // Dynamic Monthly Registration Trends Chart (Calculated from real user created_at timestamps)
+  const calculateMonthlyRegistrations = (usersList) => {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthCounts = {};
+    months.forEach(m => monthCounts[m] = 0);
+
+    (usersList || []).forEach(u => {
+      if (u.created_at) {
+        const d = new Date(u.created_at);
+        const mName = months[d.getMonth()];
+        monthCounts[mName] = (monthCounts[mName] || 0) + 1;
+      }
+    });
+
+    const maxVal = Math.max(...Object.values(monthCounts), 1);
+    return months.slice(-6).map(m => {
+      const cnt = monthCounts[m] || 0;
+      const pct = Math.round((cnt / maxVal) * 100);
+      return { m, v: cnt, h: `${Math.max(pct, cnt > 0 ? 15 : 4)}%` };
+    });
+  };
+
+  const monthlyBarData = calculateMonthlyRegistrations(users);
+
+  // Real Progress Bar Percentages
+  const verifiedListingsCount = listings.filter(l => l.verified !== false).length;
+  const verifiedListingsPct = totalListings > 0 ? Math.round((verifiedListingsCount / totalListings) * 100) : 0;
+
+  const totalBookingsCount = bookings.length;
+  const confirmedBookingsCount = bookings.filter(b => (b.status || '').toLowerCase().includes('confirmed') || (b.status || '').toLowerCase().includes('approved')).length;
+  const activeBookingsPct = totalBookingsCount > 0 ? Math.round((confirmedBookingsCount / totalBookingsCount) * 100) : 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -647,14 +703,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
                 <BarChart3 size={16} /> User Registration Trends (Monthly)
               </h4>
               <div className="admin-chart-bar-container">
-                {[
-                  { m: 'Feb', v: 45, h: '45%' },
-                  { m: 'Mar', v: 62, h: '62%' },
-                  { m: 'Apr', v: 75, h: '75%' },
-                  { m: 'May', v: 90, h: '90%' },
-                  { m: 'Jun', v: 110, h: '100%' },
-                  { m: 'Jul', v: 95, h: '88%' }
-                ].map((bar, i) => (
+                {monthlyBarData.map((bar, i) => (
                   <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
                     <div className="admin-chart-bar" style={{ height: bar.h }}>
                       <span className="admin-chart-bar-tooltip">{bar.v} new users</span>
@@ -673,20 +722,20 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', fontWeight: '600', marginBottom: '0.25rem' }}>
                     <span>Verified Listings</span>
-                    <span>75%</span>
+                    <span>{verifiedListingsPct}%</span>
                   </div>
                   <div style={{ height: '8px', background: 'var(--bg-secondary)', borderRadius: '50px' }}>
-                    <div style={{ width: '75%', height: '100%', background: 'var(--primary)', borderRadius: '50px' }}></div>
+                    <div style={{ width: `${verifiedListingsPct}%`, height: '100%', background: 'var(--primary)', borderRadius: '50px', transition: 'width 0.5s ease' }}></div>
                   </div>
                 </div>
 
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', fontWeight: '600', marginBottom: '0.25rem' }}>
                     <span>Active Bookings</span>
-                    <span>48%</span>
+                    <span>{activeBookingsPct}%</span>
                   </div>
                   <div style={{ height: '8px', background: 'var(--bg-secondary)', borderRadius: '50px' }}>
-                    <div style={{ width: '48%', height: '100%', background: 'var(--secondary)', borderRadius: '50px' }}></div>
+                    <div style={{ width: `${activeBookingsPct}%`, height: '100%', background: 'var(--secondary)', borderRadius: '50px', transition: 'width 0.5s ease' }}></div>
                   </div>
                 </div>
               </div>
@@ -699,15 +748,23 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
               Recent Audit Operations Feed
             </h4>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {auditLogs.slice(0, 3).map(log => (
-                <div key={log.id} className="admin-audit-log-row">
-                  <div>
-                    <span style={{ fontWeight: '700', color: 'var(--primary)' }}>[{log.admin}]</span>
-                    <span style={{ marginLeft: '0.5rem' }}>{log.action}</span>
+              {auditLogs.length > 0 ? (
+                auditLogs.slice(0, 5).map(log => (
+                  <div key={log.id} className="admin-audit-log-row">
+                    <div>
+                      <span style={{ fontWeight: '700', color: 'var(--primary)' }}>[{log.admin || log.admin_name || 'Admin'}]</span>
+                      <span style={{ marginLeft: '0.5rem' }}>{log.action}</span>
+                    </div>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{log.date || log.created_at || 'Recent'}</span>
                   </div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{log.date}</span>
+                ))
+              ) : (
+                <div style={{ textAlign: 'center', padding: '1.5rem 1rem', color: 'var(--text-muted)' }}>
+                  <ShieldCheck size={28} style={{ opacity: 0.5, marginBottom: '0.5rem', color: 'var(--primary)' }} />
+                  <p style={{ fontWeight: '600', fontSize: '0.9rem' }}>No audit activity recorded yet</p>
+                  <span style={{ fontSize: '0.75rem' }}>All admin security operations will be logged here live.</span>
                 </div>
-              ))}
+              )}
             </div>
             <button className="widget-link" style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 'bold', fontSize: '0.85rem', marginTop: '1rem', cursor: 'pointer' }} onClick={() => handleTabSelect('audit')}>
               See All Audit Trails &rarr;
@@ -1031,115 +1088,125 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
             </button>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: selectedReport ? '1.2fr 0.8fr' : '1fr', gap: '1.5rem' }}>
-            <div style={{ overflowX: 'auto' }}>
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Case ID</th>
-                    <th>Submitted By</th>
-                    <th>Reported Offender</th>
-                    <th>Offender Role</th>
-                    <th>Category</th>
-                    <th>Date Received</th>
-                    <th>Status</th>
-                    <th style={{ textAlign: 'center' }}>Admin Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reports
-                    .filter(r => reportCategoryFilter === 'All' || r.complainantRole === reportCategoryFilter)
-                    .map(r => (
-                      <tr key={r.id}>
-                        <td style={{ fontWeight: '700' }}>#{r.id}</td>
-                        <td>
-                          <div><strong>{r.reporter}</strong></div>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{r.complainantRole}</span>
-                        </td>
-                        <td>
-                          <div><strong style={{ color: 'var(--danger)' }}>{r.reported}</strong></div>
-                        </td>
-                        <td>
-                          <span className="admin-badge-pill" style={{ background: r.targetRole === 'Landlord' ? '#f3e8ff' : '#e0f2fe', color: r.targetRole === 'Landlord' ? '#6b21a8' : '#0369a1' }}>
-                            {r.targetRole}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="admin-badge-pill" style={{ background: '#fef3c7', color: '#92400e' }}>
-                            {r.reason}
-                          </span>
-                        </td>
-                        <td>{r.date}</td>
-                        <td>
-                          <span className="admin-badge-pill" style={{ 
-                            background: r.status === 'Open' ? '#fee2e2' : r.status === 'Closed' ? '#d1fae5' : r.status === 'Offender Suspended' ? '#dc2626' : '#e0f2fe',
-                            color: r.status === 'Open' ? 'var(--danger)' : r.status === 'Closed' ? '#065f46' : r.status === 'Offender Suspended' ? '#ffffff' : '#0369a1'
-                          }}>
-                            {r.status}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <button className="btn-filter-apply" style={{ padding: '0.25rem 0.65rem', fontSize: '0.75rem' }} onClick={() => setSelectedReport(r)}>
-                            Investigate Case
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
+          {reports.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3rem 1.5rem', background: 'white', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-light)' }}>
+              <CheckCircle size={40} style={{ color: 'var(--primary)', marginBottom: '1rem' }} />
+              <h3 style={{ fontSize: '1.2rem', fontWeight: '800' }}>No Open Complaints or Reports 🛡️</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                No student or landlord disputes have been filed yet. All submitted reports will appear here for live review.
+              </p>
             </div>
-
-            {selectedReport && (
-              <div style={{ border: '1px solid var(--border-light)', padding: '1.5rem', borderRadius: '8px', background: '#f8fafc', animation: 'fadeSlideIn 0.2s ease', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h4 style={{ fontWeight: '800' }}>Admin Investigation: #{selectedReport.id}</h4>
-                  <button style={{ background: 'none', border: 'none', cursor: 'pointer' }} onClick={() => setSelectedReport(null)}>
-                    <X size={16} />
-                  </button>
-                </div>
-
-                <div style={{ fontSize: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0.75rem', background: 'white', borderRadius: '6px', border: '1px solid var(--border-light)' }}>
-                  <div>Complainant ({selectedReport.complainantRole}): <strong>{selectedReport.reporter}</strong></div>
-                  <div>Reported Offender ({selectedReport.targetRole}): <strong style={{ color: 'var(--danger)' }}>{selectedReport.reported}</strong></div>
-                  <div>Grievance Category: <strong>{selectedReport.reason}</strong></div>
-                  <div>Date Logged: <strong>{selectedReport.date}</strong></div>
-                </div>
-
-                <div>
-                  <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)' }}>COMPLAINT EVIDENCE & DETAILS</span>
-                  <p style={{ fontSize: '0.9rem', background: 'white', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-light)', marginTop: '0.25rem', minHeight: '80px', lineHeight: '1.4' }}>
-                    "{selectedReport.description}"
-                  </p>
-                </div>
-
-                {selectedReport.status === 'Offender Suspended' && (
-                  <div style={{ padding: '0.75rem', background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', borderRadius: '6px', fontWeight: 'bold', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <UserX size={18} /> Offender ({selectedReport.reported}) is SUSPENDED
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: 'auto' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)' }}>ENFORCE ADMIN ACTION</span>
-                  
-                  <button className="btn-filter-apply" style={{ background: 'var(--warning)', justifyContent: 'center' }} onClick={() => resolveReport(selectedReport.id, 'Warning Issued')}>
-                    ⚠️ Issue Warning Notice to Offender
-                  </button>
-                  
-                  <button 
-                    className="btn-filter-apply" 
-                    style={{ background: 'var(--danger)', justifyContent: 'center', opacity: selectedReport.status === 'Offender Suspended' ? 0.7 : 1 }} 
-                    onClick={() => suspendOffenderAccount(selectedReport.reported, selectedReport.id)}
-                  >
-                    🚫 Suspend Reported Offender Account
-                  </button>
-                  
-                  <button className="btn-card-secondary" style={{ background: 'white', border: '1px solid var(--border-light)', justifyContent: 'center' }} onClick={() => resolveReport(selectedReport.id, 'Closed')}>
-                    ✅ Dismiss / Close Case
-                  </button>
-                </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: selectedReport ? '1.2fr 0.8fr' : '1fr', gap: '1.5rem' }}>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Case ID</th>
+                      <th>Submitted By</th>
+                      <th>Reported Offender</th>
+                      <th>Offender Role</th>
+                      <th>Category</th>
+                      <th>Date Received</th>
+                      <th>Status</th>
+                      <th style={{ textAlign: 'center' }}>Admin Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reports
+                      .filter(r => reportCategoryFilter === 'All' || r.complainantRole === reportCategoryFilter)
+                      .map(r => (
+                        <tr key={r.id}>
+                          <td style={{ fontWeight: '700' }}>#{r.id}</td>
+                          <td>
+                            <div><strong>{r.reporter}</strong></div>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{r.complainantRole}</span>
+                          </td>
+                          <td>
+                            <div><strong style={{ color: 'var(--danger)' }}>{r.reported}</strong></div>
+                          </td>
+                          <td>
+                            <span className="admin-badge-pill" style={{ background: r.targetRole === 'Landlord' ? '#f3e8ff' : '#e0f2fe', color: r.targetRole === 'Landlord' ? '#6b21a8' : '#0369a1' }}>
+                              {r.targetRole}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="admin-badge-pill" style={{ background: '#fef3c7', color: '#92400e' }}>
+                              {r.reason}
+                            </span>
+                          </td>
+                          <td>{r.date}</td>
+                          <td>
+                            <span className="admin-badge-pill" style={{ 
+                              background: r.status === 'Open' ? '#fee2e2' : r.status === 'Closed' ? '#d1fae5' : r.status === 'Offender Suspended' ? '#dc2626' : '#e0f2fe',
+                              color: r.status === 'Open' ? 'var(--danger)' : r.status === 'Closed' ? '#065f46' : r.status === 'Offender Suspended' ? '#ffffff' : '#0369a1'
+                            }}>
+                              {r.status}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button className="btn-filter-apply" style={{ padding: '0.25rem 0.65rem', fontSize: '0.75rem' }} onClick={() => setSelectedReport(r)}>
+                              Investigate Case
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
               </div>
-            )}
-          </div>
+
+              {selectedReport && (
+                <div style={{ border: '1px solid var(--border-light)', padding: '1.5rem', borderRadius: '8px', background: '#f8fafc', animation: 'fadeSlideIn 0.2s ease', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h4 style={{ fontWeight: '800' }}>Admin Investigation: #{selectedReport.id}</h4>
+                    <button style={{ background: 'none', border: 'none', cursor: 'pointer' }} onClick={() => setSelectedReport(null)}>
+                      <X size={16} />
+                    </button>
+                  </div>
+
+                  <div style={{ fontSize: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0.75rem', background: 'white', borderRadius: '6px', border: '1px solid var(--border-light)' }}>
+                    <div>Complainant ({selectedReport.complainantRole}): <strong>{selectedReport.reporter}</strong></div>
+                    <div>Reported Offender ({selectedReport.targetRole}): <strong style={{ color: 'var(--danger)' }}>{selectedReport.reported}</strong></div>
+                    <div>Grievance Category: <strong>{selectedReport.reason}</strong></div>
+                    <div>Date Logged: <strong>{selectedReport.date}</strong></div>
+                  </div>
+
+                  <div>
+                    <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)' }}>COMPLAINT EVIDENCE & DETAILS</span>
+                    <p style={{ fontSize: '0.9rem', background: 'white', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-light)', marginTop: '0.25rem', minHeight: '80px', lineHeight: '1.4' }}>
+                      "{selectedReport.description}"
+                    </p>
+                  </div>
+
+                  {selectedReport.status === 'Offender Suspended' && (
+                    <div style={{ padding: '0.75rem', background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', borderRadius: '6px', fontWeight: 'bold', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <UserX size={18} /> Offender ({selectedReport.reported}) is SUSPENDED
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: 'auto' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)' }}>ENFORCE ADMIN ACTION</span>
+                    
+                    <button className="btn-filter-apply" style={{ background: 'var(--warning)', justifyContent: 'center' }} onClick={() => resolveReport(selectedReport.id, 'Warning Issued')}>
+                      ⚠️ Issue Warning Notice to Offender
+                    </button>
+                    
+                    <button 
+                      className="btn-filter-apply" 
+                      style={{ background: 'var(--danger)', justifyContent: 'center', opacity: selectedReport.status === 'Offender Suspended' ? 0.7 : 1 }} 
+                      onClick={() => suspendOffenderAccount(selectedReport.reported, selectedReport.id)}
+                    >
+                      🚫 Suspend Reported Offender Account
+                    </button>
+                    
+                    <button className="btn-card-secondary" style={{ background: 'white', border: '1px solid var(--border-light)', justifyContent: 'center' }} onClick={() => resolveReport(selectedReport.id, 'Closed')}>
+                      ✅ Dismiss / Close Case
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

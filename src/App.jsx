@@ -12,7 +12,7 @@ import AdminPanel from './components/AdminPanel';
 import CustomerCareWidget from './components/CustomerCareWidget';
 import ErrorBoundary from './components/ErrorBoundary';
 import { DEFAULT_LISTINGS, DEFAULT_CHATS } from './database/mockDb';
-import { dbService, isConfigured } from './database/supabaseClient';
+import { dbService, isConfigured, supabase } from './database/supabaseClient';
 import DatabaseViewer from './components/DatabaseViewer';
 import { getAvatarUrl } from './utils/profileCompleteness';
 import { calculateUnreadCount } from './utils/unreadMessages';
@@ -160,6 +160,58 @@ function App() {
     const saved = localStorage.getItem('rentease_user');
     return saved ? JSON.parse(saved) : null;
   });
+
+  // Derive active user session from Supabase Auth & onAuthStateChange
+  useEffect(() => {
+    let authListener = null;
+
+    if (isConfigured) {
+      // Fetch initial active session from Supabase Auth
+      supabase.auth.getSession().then(async ({ data: { session } }) => {
+        if (session?.user) {
+          const profile = await dbService.getUserByEmail(session.user.email);
+          const rawRole = (profile?.rawRole || session.user.user_metadata?.role || 'student').toLowerCase();
+          const roleTitle = rawRole.includes('landlord') ? 'Landlord Account' : rawRole.includes('admin') ? 'Admin Account' : 'Student Account';
+
+          setCurrentUser({
+            id: session.user.id,
+            email: session.user.email,
+            name: profile?.name || session.user.user_metadata?.name || 'User',
+            phone: profile?.phone || '',
+            role: roleTitle,
+            avatar: profile?.avatar || ''
+          });
+        }
+      });
+
+      // Listen to authentication state transitions
+      const { data: listenerData } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          if (session?.user) {
+            const profile = await dbService.getUserByEmail(session.user.email);
+            const rawRole = (profile?.rawRole || session.user.user_metadata?.role || 'student').toLowerCase();
+            const roleTitle = rawRole.includes('landlord') ? 'Landlord Account' : rawRole.includes('admin') ? 'Admin Account' : 'Student Account';
+
+            setCurrentUser({
+              id: session.user.id,
+              email: session.user.email,
+              name: profile?.name || session.user.user_metadata?.name || 'User',
+              phone: profile?.phone || '',
+              role: roleTitle,
+              avatar: profile?.avatar || ''
+            });
+          }
+        } else if (event === 'SIGNED_OUT') {
+          setCurrentUser(null);
+        }
+      });
+      authListener = listenerData?.subscription;
+    }
+
+    return () => {
+      if (authListener) authListener.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -449,7 +501,10 @@ function App() {
     }));
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (isConfigured) {
+      await supabase.auth.signOut();
+    }
     setCurrentUser(null);
     setCurrentPage('home');
   };

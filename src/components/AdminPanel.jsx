@@ -1,17 +1,17 @@
 import { useState, useEffect } from 'react';
 import { dbService } from '../database/supabaseClient';
 import { getAvatarUrl } from '../utils/profileCompleteness';
-import { 
-  Users, Home, ShieldCheck, Calendar, FileText, CreditCard, 
-  Star, AlertCircle, BarChart3, Bell, Settings, Lock, 
-  Database, User, ShieldAlert, CheckCircle, RefreshCw, X, 
-  Trash2, UserX, UserCheck, Eye, EyeOff, Search, FileDown, 
+import {
+  Users, Home, ShieldCheck, Calendar, FileText, CreditCard,
+  Star, AlertCircle, BarChart3, Bell, Settings, Lock,
+  Database, User, ShieldAlert, CheckCircle, RefreshCw, X,
+  Trash2, UserX, UserCheck, Eye, EyeOff, Search, FileDown,
   AlertTriangle, Play, HelpCircle, Save, Plus, ArrowUpRight, Zap,
   Camera, Pencil, Upload, Image
 } from 'lucide-react';
 
 export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'dashboard', onTabChange, listings = [], onEditListing, onDeleteListing, onSaveSettings }) {
-  
+
   // Role Permission Guard Helpers
   const isSuperAdmin = currentUser?.role?.includes('Super Admin');
   const isSupportStaff = currentUser?.role?.includes('Support Staff');
@@ -61,22 +61,73 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
   };
 
   // --- STATE SEEDING & SIMULATIONS ---
-  
+
   // --- REAL SUPABASE POSTGRESQL STATE ENGINE ---
-  
+
   // 1. Audit Logs State
   const [auditLogs, setAuditLogs] = useState([]);
 
-  const addAuditLog = (action) => {
-    const newLog = {
-      id: Date.now(),
-      admin: currentUser?.name || 'Admin',
-      action,
-      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      ip: '192.168.1.' + Math.floor(10 + Math.random() * 90)
-    };
-    setAuditLogs(prev => [newLog, ...prev]);
-    dbService.saveAuditLog(newLog);
+  const fetchUsers = async () => {
+    try {
+      const list = await dbService.getUsers();
+      if (Array.isArray(list)) {
+        const formatted = list.map(u => ({
+          id: u.id,
+          name: u.name || u.full_name || 'User',
+          email: u.email,
+          role: (u.role || 'student').toLowerCase().includes('landlord') ? 'Landlord' : (u.role || 'student').toLowerCase().includes('admin') ? 'Admin' : 'Student',
+          status: u.status || (u.is_active === false ? 'Suspended' : 'Active'),
+          identity: u.identity || (u.is_verified ? 'Verified' : 'Unverified'),
+          university: u.university || 'BUBT',
+          created_at: u.created_at || new Date().toISOString()
+        }));
+        setUsers(formatted);
+      } else {
+        setUsers([]);
+      }
+    } catch (err) {
+      console.error('Error fetching users:', err);
+    }
+  };
+
+  const fetchPendingProperties = async () => {
+    try {
+      if (typeof dbService.getPendingPropertyVerifications === 'function') {
+        const list = await dbService.getPendingPropertyVerifications();
+        setPendingProperties(list || []);
+      }
+    } catch (err) {
+      console.error('Error fetching property verifications:', err);
+    }
+  };
+
+  const fetchReports = async () => {
+    try {
+      const reps = await dbService.getReports();
+      setReports(reps || []);
+    } catch (err) {
+      console.error('Error fetching reports:', err);
+    }
+  };
+
+  const fetchAuditLogs = async () => {
+    try {
+      const logs = await dbService.getAuditLogs();
+      setAuditLogs(logs || []);
+    } catch (err) {
+      console.error('Error fetching audit logs:', err);
+    }
+  };
+
+  const addAuditLog = async (action) => {
+    const newLog = { id: Date.now(), admin: currentUser?.name || 'Admin', action, date: new Date().toISOString().replace('T', ' ').substring(0, 16), ip: 'Admin Session' };
+    try {
+      const res = await dbService.saveAuditLog(newLog);
+      if (res?.error) throw res.error;
+      await fetchAuditLogs();
+    } catch (error) {
+      console.error('Failed to save audit log:', error);
+    }
   };
 
   // Admin Profile Edit State
@@ -156,67 +207,72 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
 
   // Fetch all live database records on mount
   useEffect(() => {
-    dbService.getUsers().then(list => {
-      if (Array.isArray(list) && list.length > 0) {
-        const formatted = list.map(u => ({
-          id: u.id,
-          name: u.name || u.full_name || 'User',
-          email: u.email,
-          role: (u.role || 'student').toLowerCase().includes('landlord') ? 'Landlord' : (u.role || 'student').toLowerCase().includes('admin') ? 'Admin' : 'Student',
-          status: 'Active',
-          identity: 'Verified',
-          university: u.university || 'BUBT',
-          created_at: u.created_at || new Date().toISOString()
-        }));
-        setUsers(formatted);
-      } else {
-        setUsers([]);
-      }
-    });
-
-    dbService.getReports().then(reps => {
-      setReports(reps || []);
-    });
-
-    dbService.getAuditLogs().then(logs => {
-      setAuditLogs(logs || []);
-    });
+    fetchUsers();
+    fetchPendingProperties();
+    fetchReports();
+    fetchAuditLogs();
 
     dbService.getBookings().then(bList => {
       setBookings(bList || []);
     });
   }, []);
 
-  const toggleUserStatus = (userIdOrName, name) => {
-    const searchTarget = (name || userIdOrName).toLowerCase();
-    setUsers(prev => prev.map(u => {
-      if (u.id === userIdOrName || (u.name && u.name.toLowerCase().includes(searchTarget)) || searchTarget.includes((u.name || '').toLowerCase())) {
-        const nextStatus = u.status === 'Active' ? 'Suspended' : 'Active';
-        addAuditLog(`${nextStatus === 'Suspended' ? 'Suspended' : 'Unsuspended'} user Account: ${u.name}`);
-        return { ...u, status: nextStatus };
-      }
-      return u;
-    }));
+  const toggleUserStatus = async (userId, name) => {
+    const user = users.find(u => u.id === userId);
+    if (!user) return;
+    const nextStatus = user.status === 'Active' ? 'Suspended' : 'Active';
+    try {
+      const result = await dbService.updateUserStatus(userId, nextStatus);
+      if (result?.error) throw result.error;
+      await addAuditLog(`${nextStatus === 'Suspended' ? 'Suspended' : 'Activated'} user Account: ${name}`);
+      await fetchUsers();
+    } catch (error) {
+      console.error('Failed to update user status:', error);
+      alert(error?.message || 'Failed to update user status.');
+    }
   };
 
-  const suspendOffenderAccount = (reportedName, reportId) => {
-    const searchTarget = reportedName.toLowerCase();
-    setUsers(prev => prev.map(u => {
-      if ((u.name && u.name.toLowerCase().includes(searchTarget)) || searchTarget.includes((u.name || '').toLowerCase()) || u.id === reportedName) {
-        addAuditLog(`Admin Action: Suspended Offender Account ${u.name} (Case #${reportId})`);
-        return { ...u, status: 'Suspended' };
-      }
-      return u;
-    }));
+  const suspendOffenderAccount = async (reportedName, reportId) => {
+    const searchTarget = String(reportedName || '').toLowerCase();
+    const offender = users.find(u =>
+      (u.name && u.name.toLowerCase().includes(searchTarget)) ||
+      searchTarget.includes((u.name || '').toLowerCase()) ||
+      u.id === reportedName
+    );
 
-    resolveReport(reportId, 'Offender Suspended');
-    alert(`🚫 Account "${reportedName}" has been SUSPENDED!\nAll platform access and listings for ${reportedName} have been disabled.`);
+    try {
+      if (offender?.id) {
+        const userRes = await dbService.updateUserStatus(offender.id, 'Suspended');
+        if (userRes?.error) throw userRes.error;
+        await addAuditLog(`Admin Action: Suspended Offender Account ${offender.name} (Case #${reportId})`);
+      } else {
+        await addAuditLog(`Admin Action: Suspended Offender ${reportedName} (Case #${reportId})`);
+      }
+
+      const reportRes = await dbService.updateReportStatus(reportId, 'Offender Suspended');
+      if (reportRes?.error) throw reportRes.error;
+
+      alert(`🚫 Account "${reportedName}" has been SUSPENDED!\nAll platform access and listings for ${reportedName} have been disabled.`);
+      setSelectedReport(null);
+      await fetchUsers();
+      await fetchReports();
+    } catch (error) {
+      console.error('Failed to suspend offender account:', error);
+      alert(error?.message || 'Failed to suspend offender account.');
+    }
   };
 
-  const deleteUser = (userId, name) => {
-    if (window.confirm(`Are you sure you want to permanently delete user: ${name}?`)) {
-      setUsers(prev => prev.filter(u => u.id !== userId));
-      addAuditLog(`Permanently deleted user: ${name} (${userId})`);
+  const deleteUser = async (userId, name) => {
+    if (!window.confirm(`Are you sure you want to permanently delete user: ${name}?`)) return;
+    try {
+      const result = await dbService.deleteUser(userId);
+      if (result?.error) throw result.error;
+      await addAuditLog(`Permanently deleted user: ${name} (${userId})`);
+      alert(`User "${name}" deleted successfully.`);
+      await fetchUsers();
+    } catch (error) {
+      console.error('Failed to delete user:', error);
+      alert(error?.message || 'Failed to delete user.');
     }
   };
 
@@ -230,26 +286,31 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
     }));
   };
 
-  const verifyPropertyAction = (id, title, action) => {
-    if (action === 'Approve') {
-      addAuditLog(`Approved property listing verification: "${title}"`);
-      alert(`Property "${title}" approved successfully!`);
-    } else {
-      addAuditLog(`Rejected property listing verification: "${title}"`);
-      alert(`Property "${title}" verification rejected.`);
+  const verifyPropertyAction = async (id, title, action) => {
+    const nextStatus = action === 'Approve' ? 'approved' : 'rejected';
+    try {
+      const result = await dbService.updatePropertyVerification(id, nextStatus);
+      if (result?.error) throw result.error;
+      await addAuditLog(`${action === 'Approve' ? 'Approved' : 'Rejected'} property listing verification: "${title}"`);
+      alert(action === 'Approve' ? `Property "${title}" approved successfully!` : `Property "${title}" verification rejected.`);
+      await fetchPendingProperties();
+    } catch (error) {
+      console.error('Failed to update property verification:', error);
+      alert(error?.message || 'Failed to update property verification.');
     }
-    setPendingProperties(prev => prev.filter(p => p.id !== id));
   };
 
-  const resolveReport = (id, action) => {
-    setReports(prev => prev.map(r => {
-      if (r.id === id) {
-        addAuditLog(`Admin Action: ${action} for complaint Case #${id}`);
-        return { ...r, status: action };
-      }
-      return r;
-    }));
-    setSelectedReport(null);
+  const resolveReport = async (id, action) => {
+    try {
+      const result = await dbService.updateReportStatus(id, action);
+      if (result?.error) throw result.error;
+      await addAuditLog(`Admin Action: ${action} for complaint Case #${id}`);
+      setSelectedReport(null);
+      await fetchReports();
+    } catch (error) {
+      console.error('Failed to update report status:', error);
+      alert(error?.message || 'Failed to update report.');
+    }
   };
 
   // 5. System Settings State
@@ -264,7 +325,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
   const saveSettings = (e) => {
     e.preventDefault();
     if (isSupportStaff) return alert('Error: Support Staff role lacks permissions to edit system settings.');
-    
+
     addAuditLog(`Updated general system preferences and weights matching parameters`);
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
@@ -413,7 +474,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
   const sendBroadcastAlert = (e) => {
     e.preventDefault();
     if (!broadcastTitle || !broadcastMsg) return;
-    
+
     addAuditLog(`Broadcasted system alert to target audience: "${broadcastTarget}"`);
     alert(`Broadcast alert sent to all: ${broadcastTarget}`);
     setBroadcastTitle('');
@@ -426,10 +487,10 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
   const totalStudents = nonAdminUsers.filter(u => (u.role || '').toLowerCase().includes('student')).length;
   const totalLandlords = nonAdminUsers.filter(u => (u.role || '').toLowerCase().includes('landlord')).length;
   const totalListings = listings.length;
-  
+
   const unverifiedListings = listings.filter(l => l.verified === false).length;
   const activeVerifications = pendingIdVerifications.length + unverifiedListings + pendingProperties.length;
-  
+
   const openReportsCount = reports.filter(r => {
     const st = (r.status || '').toLowerCase();
     return st === 'open' || st === 'investigating' || st === 'pending';
@@ -473,7 +534,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-      
+
       {/* Visual CSS Settings */}
       <style>{`
         .admin-stat-grid {
@@ -648,7 +709,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
       {/* 1. OVERVIEW DASHBOARD */}
       {activeTab === 'dashboard' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          
+
           {/* Key Metrics Grid */}
           <div className="admin-stat-grid">
             <div className="admin-stat-card">
@@ -785,17 +846,17 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               <div className="chat-inbox-search-box" style={{ margin: 0, padding: '0.4rem 0.75rem', background: '#f1f5f9' }}>
                 <Search size={14} />
-                <input 
-                  type="text" 
-                  placeholder="Search name/email..." 
+                <input
+                  type="text"
+                  placeholder="Search name/email..."
                   value={userSearch}
                   onChange={(e) => setUserSearch(e.target.value)}
                   style={{ fontSize: '0.85rem' }}
                 />
               </div>
 
-              <select 
-                className="settings-select" 
+              <select
+                className="settings-select"
                 value={userFilter}
                 onChange={(e) => setUserFilter(e.target.value)}
                 style={{ padding: '0.4rem 1rem', fontSize: '0.85rem' }}
@@ -876,7 +937,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
       {/* 3. PROPERTY & STUDENT ID VERIFICATION QUEUE */}
       {activeTab === 'verification' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          
+
           {/* STUDENT & LANDLORD IDENTITY VERIFICATION SUBMISSIONS */}
           <div className="admin-pane-container">
             <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -901,9 +962,9 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
                 {pendingIdVerifications.map(item => (
                   <div key={item.id} style={{ padding: '1.25rem', background: '#ffffff', border: '1px solid var(--border-light)', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                      <img 
-                        src={getAvatarUrl({ name: item.user_name, avatar: item.avatar || item.avatar_url || item.profile_picture })} 
-                        alt="Student Profile" 
+                      <img
+                        src={getAvatarUrl({ name: item.user_name, avatar: item.avatar || item.avatar_url || item.profile_picture })}
+                        alt="Student Profile"
                         style={{ width: '48px', height: '48px', borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--primary)' }}
                         onError={(e) => {
                           e.target.onerror = null;
@@ -922,10 +983,10 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                       {item.id_document_url && (
-                        <a 
-                          href={item.id_document_url} 
-                          target="_blank" 
-                          rel="noreferrer" 
+                        <a
+                          href={item.id_document_url}
+                          target="_blank"
+                          rel="noreferrer"
                           className="btn-card-secondary"
                           style={{ background: '#eff6ff', color: '#1e40af', border: '1px solid #bfdbfe', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', textDecoration: 'none' }}
                         >
@@ -933,17 +994,17 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
                         </a>
                       )}
 
-                      <button 
-                        className="btn-filter-apply" 
-                        style={{ background: 'var(--secondary)', fontSize: '0.8rem', padding: '0.4rem 0.85rem' }} 
+                      <button
+                        className="btn-filter-apply"
+                        style={{ background: 'var(--secondary)', fontSize: '0.8rem', padding: '0.4rem 0.85rem' }}
                         onClick={() => handleReviewIdAction(item, 'approve')}
                       >
                         Approve
                       </button>
 
-                      <button 
-                        className="btn-card-secondary" 
-                        style={{ border: '1px solid var(--danger)', color: 'var(--danger)', fontSize: '0.8rem', padding: '0.4rem 0.85rem' }} 
+                      <button
+                        className="btn-card-secondary"
+                        style={{ border: '1px solid var(--danger)', color: 'var(--danger)', fontSize: '0.8rem', padding: '0.4rem 0.85rem' }}
                         onClick={() => handleReviewIdAction(item, 'reject')}
                       >
                         Reject
@@ -957,61 +1018,61 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
 
           {/* PROPERTY VERIFICATION QUEUE */}
           <div className="admin-pane-container">
-          <div style={{ marginBottom: '2rem' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: '800' }}>Property Verification Queue</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Verify landlords property deeds and utility documentation uploads before making them public.</p>
-          </div>
+            <div style={{ marginBottom: '2rem' }}>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: '800' }}>Property Verification Queue</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Verify landlords property deeds and utility documentation uploads before making them public.</p>
+            </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            {pendingProperties.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-                <CheckCircle size={36} style={{ color: 'var(--secondary)', marginBottom: '0.5rem' }} />
-                <p>All property listings have been reviewed and approved. Verification queue is empty.</p>
-              </div>
-            ) : (
-              pendingProperties.map(p => (
-                <div key={p.id} style={{ border: '1px solid var(--border-light)', padding: '1.5rem', borderRadius: '8px', background: '#f8fafc' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
-                    <div>
-                      <h4 style={{ fontWeight: '800', fontSize: '1.1rem' }}>{p.title}</h4>
-                      <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>Address: {p.address}</p>
-                      <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Landlord Owner: <strong>{p.landlord}</strong></p>
-                    </div>
-
-                    <span className="admin-badge-pill" style={{ background: '#fffbeb', color: '#b45309' }}>
-                      {p.status}
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', margin: '1.5rem 0', background: 'white', padding: '1rem', borderRadius: '6px', border: '1px solid var(--border-light)' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)' }}>PROPERTY DEEDS SCAN</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem', border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: '4px', fontSize: '0.8rem', color: '#1e40af', cursor: 'pointer' }} onClick={() => alert(`Opening simulated viewer for deeds document: ${p.docs}`)}>
-                        <FileText size={16} /> <span>{p.docs}</span>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)' }}>LATEST MONTH UTILITY ELECTRIC BILL</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem', border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: '4px', fontSize: '0.8rem', color: '#1e40af', cursor: 'pointer' }} onClick={() => alert(`Opening simulated viewer for utility bill image: ${p.utilityBill}`)}>
-                        <FileText size={16} /> <span>{p.utilityBill}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                    <button className="btn-filter-apply" style={{ background: 'var(--secondary)', padding: '0.4rem 1rem', fontSize: '0.85rem' }} onClick={() => verifyPropertyAction(p.id, p.title, 'Approve')}>
-                      Approve & Publish Listing
-                    </button>
-                    <button className="btn-card-secondary" style={{ border: '1px solid var(--danger)', color: 'var(--danger)', padding: '0.4rem 1rem', fontSize: '0.85rem' }} onClick={() => verifyPropertyAction(p.id, p.title, 'Reject')}>
-                      Reject Upload Details
-                    </button>
-                  </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {pendingProperties.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+                  <CheckCircle size={36} style={{ color: 'var(--secondary)', marginBottom: '0.5rem' }} />
+                  <p>All property listings have been reviewed and approved. Verification queue is empty.</p>
                 </div>
-              ))
-            )}
+              ) : (
+                pendingProperties.map(p => (
+                  <div key={p.id} style={{ border: '1px solid var(--border-light)', padding: '1.5rem', borderRadius: '8px', background: '#f8fafc' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+                      <div>
+                        <h4 style={{ fontWeight: '800', fontSize: '1.1rem' }}>{p.title}</h4>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>Address: {p.address}</p>
+                        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Landlord Owner: <strong>{p.landlord}</strong></p>
+                      </div>
+
+                      <span className="admin-badge-pill" style={{ background: '#fffbeb', color: '#b45309' }}>
+                        {p.status}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', margin: '1.5rem 0', background: 'white', padding: '1rem', borderRadius: '6px', border: '1px solid var(--border-light)' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)' }}>PROPERTY DEEDS SCAN</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem', border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: '4px', fontSize: '0.8rem', color: '#1e40af', cursor: 'pointer' }} onClick={() => alert(`Opening simulated viewer for deeds document: ${p.docs}`)}>
+                          <FileText size={16} /> <span>{p.docs}</span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)' }}>LATEST MONTH UTILITY ELECTRIC BILL</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem', border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: '4px', fontSize: '0.8rem', color: '#1e40af', cursor: 'pointer' }} onClick={() => alert(`Opening simulated viewer for utility bill image: ${p.utilityBill}`)}>
+                          <FileText size={16} /> <span>{p.utilityBill}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                      <button className="btn-filter-apply" style={{ background: 'var(--secondary)', padding: '0.4rem 1rem', fontSize: '0.85rem' }} onClick={() => verifyPropertyAction(p.id, p.title, 'Approve')}>
+                        Approve & Publish Listing
+                      </button>
+                      <button className="btn-card-secondary" style={{ border: '1px solid var(--danger)', color: 'var(--danger)', padding: '0.4rem 1rem', fontSize: '0.85rem' }} onClick={() => verifyPropertyAction(p.id, p.title, 'Reject')}>
+                        Reject Upload Details
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
-        </div>
         </div>
       )}
 
@@ -1027,7 +1088,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
             {listings.map(item => (
               <div key={item.id} style={{ background: '#f8fafc', border: '1px solid var(--border-light)', borderRadius: '8px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 <img src={item.image} alt={item.title} style={{ width: '100%', height: '140px', objectFit: 'cover' }} onError={(e) => { e.target.src = "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=600&q=80" }} />
-                
+
                 <div style={{ padding: '1rem', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--primary)' }}>{item.type}</span>
@@ -1039,12 +1100,12 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
                   <h4 style={{ fontWeight: '800', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{item.title}</h4>
                   <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Owner Host: <strong>{item.landlord?.name}</strong></p>
                   <p style={{ fontWeight: '700', color: 'var(--text-main)', fontSize: '0.9rem' }}>{item.price.toLocaleString()} BDT/mo</p>
-                  
+
                   <div style={{ display: 'flex', gap: '0.25rem', marginTop: 'auto', paddingTop: '0.75rem', borderTop: '1px solid var(--border-light)' }}>
                     <button className="btn-card-secondary" style={{ flex: 1, padding: '0.35rem', fontSize: '0.75rem', border: '1px solid var(--border-light)', background: 'white' }} onClick={() => alert(`Opening simulated property editor for listing: "${item.title}"`)}>
                       Edit Details
                     </button>
-                    
+
                     {isSuperAdmin && (
                       <button className="btn-card-secondary" style={{ padding: '0.35rem', background: '#ffe4e6', color: 'var(--danger)', border: 'none' }} onClick={() => onDeleteListing(item.id)} title="Delete Listing">
                         <Trash2 size={14} />
@@ -1068,19 +1129,19 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
 
           {/* Sub-tab section buttons for Student & Landlord complaints */}
           <div className="admin-tab-btn-row" style={{ gap: '0.5rem', marginBottom: '1.5rem' }}>
-            <button 
+            <button
               className={`admin-tab-btn ${reportCategoryFilter === 'All' ? 'active' : ''}`}
               onClick={() => setReportCategoryFilter('All')}
             >
               All Complaints ({reports.length})
             </button>
-            <button 
+            <button
               className={`admin-tab-btn ${reportCategoryFilter === 'Student' ? 'active' : ''}`}
               onClick={() => setReportCategoryFilter('Student')}
             >
               🎓 Student Complaints ({reports.filter(r => r.complainantRole === 'Student').length})
             </button>
-            <button 
+            <button
               className={`admin-tab-btn ${reportCategoryFilter === 'Landlord' ? 'active' : ''}`}
               onClick={() => setReportCategoryFilter('Landlord')}
             >
@@ -1137,7 +1198,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
                           </td>
                           <td>{r.date}</td>
                           <td>
-                            <span className="admin-badge-pill" style={{ 
+                            <span className="admin-badge-pill" style={{
                               background: r.status === 'Open' ? '#fee2e2' : r.status === 'Closed' ? '#d1fae5' : r.status === 'Offender Suspended' ? '#dc2626' : '#e0f2fe',
                               color: r.status === 'Open' ? 'var(--danger)' : r.status === 'Closed' ? '#065f46' : r.status === 'Offender Suspended' ? '#ffffff' : '#0369a1'
                             }}>
@@ -1186,19 +1247,19 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: 'auto' }}>
                     <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)' }}>ENFORCE ADMIN ACTION</span>
-                    
+
                     <button className="btn-filter-apply" style={{ background: 'var(--warning)', justifyContent: 'center' }} onClick={() => resolveReport(selectedReport.id, 'Warning Issued')}>
                       ⚠️ Issue Warning Notice to Offender
                     </button>
-                    
-                    <button 
-                      className="btn-filter-apply" 
-                      style={{ background: 'var(--danger)', justifyContent: 'center', opacity: selectedReport.status === 'Offender Suspended' ? 0.7 : 1 }} 
+
+                    <button
+                      className="btn-filter-apply"
+                      style={{ background: 'var(--danger)', justifyContent: 'center', opacity: selectedReport.status === 'Offender Suspended' ? 0.7 : 1 }}
                       onClick={() => suspendOffenderAccount(selectedReport.reported, selectedReport.id)}
                     >
                       🚫 Suspend Reported Offender Account
                     </button>
-                    
+
                     <button className="btn-card-secondary" style={{ background: 'white', border: '1px solid var(--border-light)', justifyContent: 'center' }} onClick={() => resolveReport(selectedReport.id, 'Closed')}>
                       ✅ Dismiss / Close Case
                     </button>
@@ -1332,7 +1393,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
                   <td style={{ color: '#047857', fontWeight: '600' }}>{p.commission} BDT</td>
                   <td>{p.date}</td>
                   <td>
-                    <span className="admin-badge-pill" style={{ 
+                    <span className="admin-badge-pill" style={{
                       background: p.status === 'Verified' ? '#d1fae5' : p.status === 'Refunded' ? '#cbd5e1' : '#fef3c7',
                       color: p.status === 'Verified' ? '#065f46' : p.status === 'Refunded' ? '#334155' : '#b45309'
                     }}>
@@ -1547,10 +1608,10 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
 
               <div className="form-group">
                 <label className="filter-label">Broadcast Alert Title</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="e.g. Server Maintenance Notice or Security Upgrade alert" 
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Server Maintenance Notice or Security Upgrade alert"
                   value={broadcastTitle}
                   onChange={(e) => setBroadcastTitle(e.target.value)}
                   required
@@ -1559,10 +1620,10 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
 
               <div className="form-group">
                 <label className="filter-label">Alert Body Details</label>
-                <textarea 
-                  className="form-input" 
-                  rows="4" 
-                  placeholder="Type your broadcasting message text..." 
+                <textarea
+                  className="form-input"
+                  rows="4"
+                  placeholder="Type your broadcasting message text..."
                   value={broadcastMsg}
                   onChange={(e) => setBroadcastMsg(e.target.value)}
                   required
@@ -1667,10 +1728,10 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
               <div className="form-group">
                 <label className="filter-label">App Interface Site Name</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  value={siteName} 
+                <input
+                  type="text"
+                  className="form-input"
+                  value={siteName}
                   onChange={(e) => setSiteName(e.target.value)}
                   disabled={isSupportStaff}
                 />
@@ -1680,9 +1741,9 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
                 <span className="filter-label">Portal Maintenance Mode</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
                   <label className="custom-toggle">
-                    <input 
-                      type="checkbox" 
-                      checked={maintenanceMode} 
+                    <input
+                      type="checkbox"
+                      checked={maintenanceMode}
                       onChange={(e) => setMaintenanceMode(e.target.checked)}
                       disabled={isSupportStaff}
                     />
@@ -1699,7 +1760,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
               <h4 style={{ fontWeight: '800', fontSize: '1rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Zap size={18} style={{ color: 'var(--primary)' }} /> Roommate Matching Parameter Weights (%)
               </h4>
-              
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
                 <div className="form-group">
                   <label className="filter-label">Cleanliness Preference Weight</label>
@@ -1739,9 +1800,9 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
             </div>
 
             {isSuperAdmin && (
-              <button 
+              <button
                 onClick={() => setShowAddSubAdminModal(true)}
-                className="btn-filter-apply" 
+                className="btn-filter-apply"
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.6rem 1rem' }}
               >
                 <Plus size={16} /> Add Sub-Admin
@@ -1898,32 +1959,32 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
                 <form onSubmit={handleAddSubAdminSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                   <div>
                     <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.35rem' }}>Sub-Admin Full Name</label>
-                    <input 
-                      type="text" 
-                      className="form-input" 
+                    <input
+                      type="text"
+                      className="form-input"
                       placeholder="e.g. Officer Sumon"
-                      value={newSubName} 
+                      value={newSubName}
                       onChange={(e) => setNewSubName(e.target.value)}
-                      required 
+                      required
                     />
                   </div>
 
                   <div>
                     <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.35rem' }}>Email Address / Login</label>
-                    <input 
-                      type="email" 
-                      className="form-input" 
+                    <input
+                      type="email"
+                      className="form-input"
                       placeholder="e.g. subadmin@rentease.com"
-                      value={newSubEmail} 
+                      value={newSubEmail}
                       onChange={(e) => setNewSubEmail(e.target.value)}
-                      required 
+                      required
                     />
                   </div>
 
                   <div>
                     <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.35rem' }}>Role Title</label>
-                    <select 
-                      className="form-input" 
+                    <select
+                      className="form-input"
                       value={newSubRole}
                       onChange={(e) => setNewSubRole(e.target.value)}
                     >
@@ -1989,7 +2050,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
 
             <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: '1.25rem', marginTop: '0.5rem' }}>
               <span className="filter-label" style={{ fontWeight: 'bold' }}>FAQ Entry Configuration</span>
-              
+
               <div className="form-group" style={{ marginTop: '0.5rem' }}>
                 <label className="filter-label">Question Text</label>
                 <input type="text" className="form-input" value={faqTitle} onChange={(e) => setFaqTitle(e.target.value)} />
@@ -2018,23 +2079,23 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
           )}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem' }}>
-            
+
             {/* Personal Details & Avatar Change */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <h3 style={{ fontSize: '1.25rem', fontWeight: '800', borderBottom: '1px solid var(--border-light)', paddingBottom: '0.5rem' }}>
                 Admin Credentials Profile 👤
               </h3>
-              
+
               <div style={{ display: 'flex', gap: '1.25rem', alignItems: 'center' }}>
-                <div 
-                  style={{ position: 'relative', cursor: 'pointer' }} 
-                  onClick={() => setShowPhotoModal(true)} 
+                <div
+                  style={{ position: 'relative', cursor: 'pointer' }}
+                  onClick={() => setShowPhotoModal(true)}
                   title="Click to Change Admin Profile Photo"
                 >
-                  <img 
-                    src={adminAvatar} 
-                    alt="avatar" 
-                    style={{ width: '85px', height: '85px', borderRadius: '50%', border: '3px solid var(--primary)', objectFit: 'cover' }} 
+                  <img
+                    src={adminAvatar}
+                    alt="avatar"
+                    style={{ width: '85px', height: '85px', borderRadius: '50%', border: '3px solid var(--primary)', objectFit: 'cover' }}
                     onError={(e) => {
                       e.target.onerror = null;
                       e.target.src = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=200&h=200&q=80";
@@ -2118,7 +2179,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
               <h3 style={{ fontSize: '1.25rem', fontWeight: '800', borderBottom: '1px solid var(--border-light)', paddingBottom: '0.5rem' }}>
                 Reset Access Password 🔐
               </h3>
-              
+
               <form onSubmit={(e) => { e.preventDefault(); alert('Password updated successfully!'); }} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div className="form-group">
                   <label className="filter-label">Current Node Password</label>
@@ -2168,10 +2229,10 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                   {/* Current Avatar Preview */}
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
-                    <img 
-                      src={customAvatarUrl || adminAvatar} 
-                      alt="Preview" 
-                      style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid var(--primary)', objectFit: 'cover' }} 
+                    <img
+                      src={customAvatarUrl || adminAvatar}
+                      alt="Preview"
+                      style={{ width: '100px', height: '100px', borderRadius: '50%', border: '4px solid var(--primary)', objectFit: 'cover' }}
                       onError={(e) => {
                         e.target.onerror = null;
                         e.target.src = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=200&h=200&q=80";
@@ -2323,7 +2384,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <h4 style={{ fontWeight: '800', fontSize: '0.95rem' }}>Backup Log Archive</h4>
-            
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               {backups.map((b, i) => (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', padding: '1rem', border: '1px solid var(--border-light)', borderRadius: '6px' }}>
@@ -2337,7 +2398,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
 
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                     <span style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>{b.size}</span>
-                    
+
                     <button className="btn-card-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', background: 'white', border: '1px solid var(--border-light)' }} onClick={() => alert(`Downloading SQL script: ${b.name}`)}>
                       Download SQL File
                     </button>
@@ -2374,7 +2435,7 @@ export default function AdminPanel({ currentUser, activeTab: propActiveTab = 'da
               Enter the reason for rejecting <strong>{rejectionModalItem.user_name}</strong>'s ID verification submission:
             </p>
 
-            <textarea 
+            <textarea
               className="settings-textarea"
               rows={4}
               placeholder="e.g. ID card photo is blurry / expired document / student ID name does not match profile name..."

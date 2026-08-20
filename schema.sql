@@ -451,101 +451,170 @@ ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.admin_actions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.help_articles ENABLE ROW LEVEL SECURITY;
 
--- Allow Public Access Policies (Safe Idempotent Policy Creation)
+-- --------------------------------------------------------------------
+-- 1. PROFILES SECURITY POLICIES
+-- Users can SELECT/UPDATE/INSERT only their own profile row (auth.uid() = id).
+-- --------------------------------------------------------------------
 DROP POLICY IF EXISTS "Public Profiles" ON public.profiles;
-CREATE POLICY "Public Profiles" ON public.profiles FOR ALL USING (true);
+DROP POLICY IF EXISTS "Users SELECT own profile" ON public.profiles;
+CREATE POLICY "Users SELECT own profile" ON public.profiles FOR SELECT USING (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users UPDATE own profile" ON public.profiles;
+CREATE POLICY "Users UPDATE own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Users INSERT own profile" ON public.profiles;
+CREATE POLICY "Users INSERT own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
+
+-- Student Profiles: Users can manage only their own student profile
 DROP POLICY IF EXISTS "Public Student Profiles" ON public.student_profiles;
-CREATE POLICY "Public Student Profiles" ON public.student_profiles FOR ALL USING (true);
+DROP POLICY IF EXISTS "Student manage own profile" ON public.student_profiles;
+CREATE POLICY "Student manage own profile" ON public.student_profiles FOR ALL USING (auth.uid() = student_id);
 
+-- Landlord Profiles: Landlords can manage only their own landlord profile
 DROP POLICY IF EXISTS "Public Landlord Profiles" ON public.landlord_profiles;
-CREATE POLICY "Public Landlord Profiles" ON public.landlord_profiles FOR ALL USING (true);
+DROP POLICY IF EXISTS "Landlord manage own profile" ON public.landlord_profiles;
+CREATE POLICY "Landlord manage own profile" ON public.landlord_profiles FOR ALL USING (auth.uid() = landlord_id);
 
+-- --------------------------------------------------------------------
+-- 2. PROPERTY MARKETPLACE POLICIES
+-- Marketplace property viewing is public (SELECT true), but INSERT/UPDATE/DELETE restricted to landlord owner.
+-- --------------------------------------------------------------------
 DROP POLICY IF EXISTS "Public Properties" ON public.properties;
-CREATE POLICY "Public Properties" ON public.properties FOR ALL USING (true);
+DROP POLICY IF EXISTS "Public SELECT properties" ON public.properties;
+CREATE POLICY "Public SELECT properties" ON public.properties FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Landlord INSERT properties" ON public.properties;
+CREATE POLICY "Landlord INSERT properties" ON public.properties FOR INSERT WITH CHECK (auth.uid() = landlord_id);
+
+DROP POLICY IF EXISTS "Landlord UPDATE properties" ON public.properties;
+CREATE POLICY "Landlord UPDATE properties" ON public.properties FOR UPDATE USING (auth.uid() = landlord_id);
+
+DROP POLICY IF EXISTS "Landlord DELETE properties" ON public.properties;
+CREATE POLICY "Landlord DELETE properties" ON public.properties FOR DELETE USING (auth.uid() = landlord_id);
 
 DROP POLICY IF EXISTS "Public Property Images" ON public.property_images;
-CREATE POLICY "Public Property Images" ON public.property_images FOR ALL USING (true);
+DROP POLICY IF EXISTS "Public SELECT property_images" ON public.property_images;
+CREATE POLICY "Public SELECT property_images" ON public.property_images FOR SELECT USING (true);
 
 DROP POLICY IF EXISTS "Public Property Verifications" ON public.property_verifications;
-CREATE POLICY "Public Property Verifications" ON public.property_verifications FOR ALL USING (true);
+DROP POLICY IF EXISTS "Landlord manage property verifications" ON public.property_verifications;
+CREATE POLICY "Landlord manage property verifications" ON public.property_verifications FOR ALL USING (auth.uid() = landlord_id);
 
+-- --------------------------------------------------------------------
+-- 3. BOOKINGS, LEASES, CONTRACTS & PAYMENTS POLICIES
+-- Only visible & manageable by the participating parties (auth.uid() matches student_id or landlord_id).
+-- --------------------------------------------------------------------
+-- Bookings: Restricted to participating student or landlord
 DROP POLICY IF EXISTS "Public Bookings" ON public.bookings;
-CREATE POLICY "Public Bookings" ON public.bookings FOR ALL USING (true);
+DROP POLICY IF EXISTS "Parties manage bookings" ON public.bookings;
+CREATE POLICY "Parties manage bookings" ON public.bookings FOR ALL USING (auth.uid() = student_id OR auth.uid() = landlord_id);
 
+-- Lease Agreements: Restricted to participating student or landlord
 DROP POLICY IF EXISTS "Public Lease Agreements" ON public.lease_agreements;
-CREATE POLICY "Public Lease Agreements" ON public.lease_agreements FOR ALL USING (true);
+DROP POLICY IF EXISTS "Parties manage lease_agreements" ON public.lease_agreements;
+CREATE POLICY "Parties manage lease_agreements" ON public.lease_agreements FOR ALL USING (auth.uid() = student_id OR auth.uid() = landlord_id);
 
+-- Contracts: Restricted to participating student or landlord (matching text UUIDs)
+DROP POLICY IF EXISTS "Public Contracts" ON public.contracts;
+DROP POLICY IF EXISTS "Parties manage contracts" ON public.contracts;
+CREATE POLICY "Parties manage contracts" ON public.contracts FOR ALL USING (auth.uid()::text = student_id OR auth.uid()::text = landlord_id);
+
+-- Payments: Restricted to participating student or landlord
 DROP POLICY IF EXISTS "Public Payments" ON public.payments;
-CREATE POLICY "Public Payments" ON public.payments FOR ALL USING (true);
+DROP POLICY IF EXISTS "Parties manage payments" ON public.payments;
+CREATE POLICY "Parties manage payments" ON public.payments FOR ALL USING (auth.uid() = student_id OR auth.uid() = landlord_id);
 
+-- --------------------------------------------------------------------
+-- 4. ROOMMATE & MESSAGING MODULE POLICIES
+-- Roommate profiles public read; chats/messages restricted to participant users.
+-- --------------------------------------------------------------------
 DROP POLICY IF EXISTS "Public Roommate Profiles" ON public.roommate_profiles;
-CREATE POLICY "Public Roommate Profiles" ON public.roommate_profiles FOR ALL USING (true);
+CREATE POLICY "Public SELECT roommate_profiles" ON public.roommate_profiles FOR SELECT USING (true);
+CREATE POLICY "Student manage roommate_profile" ON public.roommate_profiles FOR ALL USING (auth.uid() = student_id);
 
 DROP POLICY IF EXISTS "Public Roommate Requests" ON public.roommate_requests;
-CREATE POLICY "Public Roommate Requests" ON public.roommate_requests FOR ALL USING (true);
+CREATE POLICY "Parties manage roommate_requests" ON public.roommate_requests FOR ALL USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
 
 DROP POLICY IF EXISTS "Public Roommate Matches" ON public.roommate_matches;
-CREATE POLICY "Public Roommate Matches" ON public.roommate_matches FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Public Listings" ON public.listings;
-CREATE POLICY "Public Listings" ON public.listings FOR ALL USING (true);
+CREATE POLICY "Parties manage roommate_matches" ON public.roommate_matches FOR ALL USING (auth.uid() = student_a_id OR auth.uid() = student_b_id);
 
 DROP POLICY IF EXISTS "Public Chats" ON public.chats;
-CREATE POLICY "Public Chats" ON public.chats FOR ALL USING (true);
+CREATE POLICY "Public SELECT chats" ON public.chats FOR SELECT USING (auth.uid() IS NOT NULL);
 
 DROP POLICY IF EXISTS "Public Messages" ON public.messages;
-CREATE POLICY "Public Messages" ON public.messages FOR ALL USING (true);
+CREATE POLICY "Users manage messages" ON public.messages FOR ALL USING (auth.uid() = sender_id OR auth.uid()::text = sender_id);
 
 DROP POLICY IF EXISTS "Public Reviews" ON public.reviews;
-CREATE POLICY "Public Reviews" ON public.reviews FOR ALL USING (true);
+CREATE POLICY "Public SELECT reviews" ON public.reviews FOR SELECT USING (true);
+CREATE POLICY "Student INSERT reviews" ON public.reviews FOR INSERT WITH CHECK (auth.uid() = student_id);
 
 DROP POLICY IF EXISTS "Public Reports" ON public.reports;
-CREATE POLICY "Public Reports" ON public.reports FOR ALL USING (true);
+CREATE POLICY "Reporter manage reports" ON public.reports FOR ALL USING (auth.uid() = reporter_id);
 
 DROP POLICY IF EXISTS "Public Notifications" ON public.notifications;
-CREATE POLICY "Public Notifications" ON public.notifications FOR ALL USING (true);
+CREATE POLICY "User manage notifications" ON public.notifications FOR ALL USING (auth.uid() = user_id);
 
 DROP POLICY IF EXISTS "Public Content" ON public.content;
-CREATE POLICY "Public Content" ON public.content FOR ALL USING (true);
+CREATE POLICY "Public SELECT content" ON public.content FOR SELECT USING (true);
 
 DROP POLICY IF EXISTS "Public System Settings" ON public.system_settings;
-CREATE POLICY "Public System Settings" ON public.system_settings FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Public Security Events" ON public.security_events;
-CREATE POLICY "Public Security Events" ON public.security_events FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Public Audit Logs" ON public.audit_logs;
-CREATE POLICY "Public Audit Logs" ON public.audit_logs FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Public Admin Actions" ON public.admin_actions;
-CREATE POLICY "Public Admin Actions" ON public.admin_actions FOR ALL USING (true);
+CREATE POLICY "Public SELECT system_settings" ON public.system_settings FOR SELECT USING (true);
 
 DROP POLICY IF EXISTS "Public Help Articles" ON public.help_articles;
-CREATE POLICY "Public Help Articles" ON public.help_articles FOR ALL USING (true);
+CREATE POLICY "Public SELECT help_articles" ON public.help_articles FOR SELECT USING (true);
+
+-- --------------------------------------------------------------------
+-- 5. AUDIT LOGS, ADMIN ACTIONS & SECURITY EVENTS POLICIES
+-- No client access allowed (USING false for anon/authenticated). Accessible ONLY via server-side Service Role key.
+-- --------------------------------------------------------------------
+DROP POLICY IF EXISTS "Public Security Events" ON public.security_events;
+DROP POLICY IF EXISTS "No client access security_events" ON public.security_events;
+CREATE POLICY "No client access security_events" ON public.security_events FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Public Audit Logs" ON public.audit_logs;
+DROP POLICY IF EXISTS "No client access audit_logs" ON public.audit_logs;
+CREATE POLICY "No client access audit_logs" ON public.audit_logs FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Public Admin Actions" ON public.admin_actions;
+DROP POLICY IF EXISTS "No client access admin_actions" ON public.admin_actions;
+CREATE POLICY "No client access admin_actions" ON public.admin_actions FOR ALL USING (false);
 
 -- ====================================================================
--- SUPABASE STORAGE BUCKETS & FOLDER POLICIES
+-- SUPABASE STORAGE BUCKETS & FOLDER SECURITY POLICIES
 -- ====================================================================
 
 -- 1. Create Storage Buckets
 INSERT INTO storage.buckets (id, name, public) VALUES ('property-images', 'property-images', true) ON CONFLICT (id) DO NOTHING;
 INSERT INTO storage.buckets (id, name, public) VALUES ('profile-images', 'profile-images', true) ON CONFLICT (id) DO NOTHING;
-INSERT INTO storage.buckets (id, name, public) VALUES ('landlord-verification', 'landlord-verification', true) ON CONFLICT (id) DO NOTHING;
-INSERT INTO storage.buckets (id, name, public) VALUES ('lease-documents', 'lease-documents', true) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('landlord-verification', 'landlord-verification', false) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('lease-documents', 'lease-documents', false) ON CONFLICT (id) DO NOTHING;
 
 -- 2. Storage Security Policies
+-- Public property-images read; authenticated landlord upload
 DROP POLICY IF EXISTS "Public Property Images Access" ON storage.objects;
-CREATE POLICY "Public Property Images Access" ON storage.objects FOR ALL USING (bucket_id = 'property-images');
+DROP POLICY IF EXISTS "Public SELECT property-images" ON storage.objects;
+CREATE POLICY "Public SELECT property-images" ON storage.objects FOR SELECT USING (bucket_id = 'property-images');
 
+DROP POLICY IF EXISTS "Authenticated INSERT property-images" ON storage.objects;
+CREATE POLICY "Authenticated INSERT property-images" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'property-images' AND auth.uid() IS NOT NULL);
+
+-- Public profile-images read; authenticated user upload
 DROP POLICY IF EXISTS "Public Profile Images Access" ON storage.objects;
-CREATE POLICY "Public Profile Images Access" ON storage.objects FOR ALL USING (bucket_id = 'profile-images');
+DROP POLICY IF EXISTS "Public SELECT profile-images" ON storage.objects;
+CREATE POLICY "Public SELECT profile-images" ON storage.objects FOR SELECT USING (bucket_id = 'profile-images');
 
+DROP POLICY IF EXISTS "Authenticated INSERT profile-images" ON storage.objects;
+CREATE POLICY "Authenticated INSERT profile-images" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'profile-images' AND auth.uid() IS NOT NULL);
+
+-- Landlord verification documents: Scope to owning landlord user only
 DROP POLICY IF EXISTS "Public Landlord Verification Access" ON storage.objects;
-CREATE POLICY "Public Landlord Verification Access" ON storage.objects FOR ALL USING (bucket_id = 'landlord-verification');
+DROP POLICY IF EXISTS "Landlord owner verification documents access" ON storage.objects;
+CREATE POLICY "Landlord owner verification documents access" ON storage.objects FOR ALL USING (bucket_id = 'landlord-verification' AND auth.uid()::text = (storage.foldername(name))[1]);
 
+-- Lease documents: Scope to owning user only
 DROP POLICY IF EXISTS "Public Lease Documents Access" ON storage.objects;
-CREATE POLICY "Public Lease Documents Access" ON storage.objects FOR ALL USING (bucket_id = 'lease-documents');
+DROP POLICY IF EXISTS "User owner lease documents access" ON storage.objects;
+CREATE POLICY "User owner lease documents access" ON storage.objects FOR ALL USING (bucket_id = 'lease-documents' AND auth.uid()::text = (storage.foldername(name))[1]);
 
 -- ====================================================================
 -- REALTIME HOMEPAGE STATS RPC FUNCTION
@@ -593,7 +662,7 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 
 -- --------------------------------------------------------------------
--- 23. TEMPORARY EMAIL VERIFICATIONS (10-MIN EXPIRATION & JSON PAYLOAD)
+-- 23. TEMPORARY EMAIL VERIFICATIONS (SERVER-ONLY ACCESS VIA SERVICE ROLE)
 -- --------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.email_verifications (
   email VARCHAR(255) PRIMARY KEY,
@@ -602,6 +671,10 @@ CREATE TABLE IF NOT EXISTS public.email_verifications (
   expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE public.email_verifications ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "No client access email_verifications" ON public.email_verifications;
+CREATE POLICY "No client access email_verifications" ON public.email_verifications FOR ALL USING (false);
 
 -- --------------------------------------------------------------------
 -- 24. STUDENT & LANDLORD ID VERIFICATIONS (ADMIN APPROVAL QUEUE)
@@ -617,3 +690,8 @@ CREATE TABLE IF NOT EXISTS public.id_verifications (
   reviewed_at TIMESTAMP WITH TIME ZONE,
   reviewed_by VARCHAR(255)
 );
+
+ALTER TABLE public.id_verifications ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "User manage own id_verification" ON public.id_verifications;
+CREATE POLICY "User manage own id_verification" ON public.id_verifications FOR ALL USING (auth.jwt() ->> 'email' = user_email);
+

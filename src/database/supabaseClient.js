@@ -39,27 +39,102 @@ export const dbService = {
   // --- 1. PROFILES & USERS ---
   async getUsers() {
     if (isConfigured) {
-      try {
-        const { data, error } = await supabase.from('profiles').select('*');
-        if (!error && data && data.length > 0) return data;
-      } catch (e) {
-        console.warn('Supabase getUsers error:', e);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase getUsers error:', error);
+        throw error;
       }
+
+      return (data || []).map(u => ({
+        id: u.id,
+        name: u.full_name || u.name || 'User',
+        full_name: u.full_name || u.name || 'User',
+        email: u.email,
+        phone: u.phone || '',
+        role: u.role || 'student',
+        rawRole: u.role || 'student',
+        status: u.is_active === false ? 'Suspended' : 'Active',
+        is_active: u.is_active !== false,
+        identity: u.is_verified ? 'Verified' : 'Unverified',
+        is_verified: Boolean(u.is_verified),
+        university: u.university || 'BUBT',
+        avatar: u.avatar_url || u.profile_picture || u.avatar || '',
+        avatar_url: u.avatar_url || u.profile_picture || u.avatar || '',
+        created_at: u.created_at || new Date().toISOString()
+      }));
     }
-    return getLocal('users');
+
+    const localUsers = getLocal('users');
+    return localUsers.map(u => ({
+      ...u,
+      name: u.name || u.full_name || 'User',
+      status: u.status || (u.is_active === false ? 'Suspended' : 'Active')
+    }));
+  },
+
+  async updateUserStatus(userId, status) {
+    if (!userId) throw new Error('User ID is required.');
+    const isActive = !(status === 'Suspended' || status === 'suspended' || status === false);
+
+    if (isConfigured) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .update({ is_active: isActive, updated_at: new Date().toISOString() })
+        .eq('id', userId)
+        .select();
+
+      if (error) {
+        console.error('Supabase updateUserStatus error:', error);
+        throw error;
+      }
+      return { success: true, is_active: isActive, data };
+    }
+
+    const currentUsers = getLocal('users');
+    const updated = currentUsers.map(u => u.id === userId ? { ...u, is_active: isActive, status: isActive ? 'Active' : 'Suspended' } : u);
+    setLocal('users', updated);
+    return { success: true, is_active: isActive };
+  },
+
+  async deleteUser(userId) {
+    if (!userId) throw new Error('User ID is required.');
+
+    if (isConfigured) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', userId)
+        .select();
+
+      if (error) {
+        console.error('Supabase deleteUser error:', error);
+        throw error;
+      }
+      return { success: true, data };
+    }
+
+    const currentUsers = getLocal('users');
+    setLocal('users', currentUsers.filter(u => u.id !== userId));
+    return { success: true };
   },
 
   async saveUser(userData) {
     if (!userData) return null;
     if (isConfigured) {
       try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const activeAuthUid = sessionData?.session?.user?.id;
         const isValidUuid = typeof userData.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userData.id);
-        const profileId = isValidUuid ? userData.id : '11111111-1111-4111-a111-' + String(Date.now()).padStart(12, '0').slice(-12);
+        const profileId = activeAuthUid || (isValidUuid ? userData.id : ('11111111-1111-4111-a111-' + String(Date.now()).padStart(12, '0').slice(-12)));
 
         await supabase.from('profiles').upsert([{
           id: profileId,
-          name: userData.name || userData.full_name || 'User',
-          email: (userData.email || '').toLowerCase().trim(),
+          full_name: userData.name || userData.full_name || 'User',
+          email: (userData.email || sessionData?.session?.user?.email || '').toLowerCase().trim(),
           phone: userData.phone || '',
           role: (userData.role || 'student').toLowerCase().includes('landlord') ? 'landlord' : (userData.role || 'student').toLowerCase().includes('admin') ? 'admin' : 'student',
           avatar_url: userData.avatar || userData.avatar_url || ''
@@ -75,24 +150,33 @@ export const dbService = {
 
   async getUserByEmail(email) {
     const key = (email || '').toLowerCase().trim();
-    if (!key) return null;
 
     if (isConfigured) {
       try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .ilike('email', key)
-          .maybeSingle();
+        const { data: sessionData } = await supabase.auth.getSession();
+        const authUser = sessionData?.session?.user;
+        const targetEmail = key || (authUser?.email || '').toLowerCase().trim();
+
+        if (!targetEmail && !authUser) return null;
+
+        let query = supabase.from('profiles').select('*');
+        if (targetEmail) {
+          query = query.ilike('email', targetEmail);
+        } else if (authUser?.id) {
+          query = query.eq('id', authUser.id);
+        }
+
+        const { data, error } = await query.maybeSingle();
+
         if (!error && data) {
           const rawRole = (data.role || 'student').toLowerCase();
           const displayRole = rawRole.includes('landlord') ? 'landlord' : rawRole.includes('admin') ? 'admin' : 'student';
           const currentUsers = getLocal('users');
-          const localUser = currentUsers.find(u => (u.email || '').toLowerCase().trim() === key);
+          const localUser = currentUsers.find(u => (u.email || '').toLowerCase().trim() === data.email);
           const resolvedAvatar = data.avatar_url || data.profile_picture || data.avatar || localUser?.avatar || localUser?.avatar_url || localUser?.profile_picture || '';
           return {
             id: data.id,
-            name: data.name || data.full_name || 'User',
+            name: data.full_name || data.name || 'User',
             email: data.email,
             phone: data.phone || '',
             role: displayRole === 'landlord' ? 'Landlord Account' : displayRole === 'admin' ? 'Admin Account' : 'Student Account',
@@ -106,6 +190,7 @@ export const dbService = {
         console.warn('Supabase getUserByEmail error:', e);
       }
     }
+    if (!key) return null;
     const currentUsers = getLocal('users');
     const localUser = currentUsers.find(u => (u.email || '').toLowerCase().trim() === key);
     if (localUser) {
@@ -219,6 +304,93 @@ export const dbService = {
     return updated;
   },
 
+  async getPendingPropertyVerifications() {
+    if (isConfigured) {
+      const { data, error } = await supabase
+        .from('property_verifications')
+        .select('*, properties(*), profiles(*)')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        return data.map(pv => ({
+          id: pv.id,
+          propertyId: pv.property_id,
+          title: pv.properties?.title || 'Property Listing',
+          address: pv.properties?.address || pv.properties?.area || 'Mirpur, Dhaka',
+          landlordName: pv.profiles?.full_name || pv.profiles?.name || 'Landlord',
+          landlordEmail: pv.profiles?.email || '',
+          ownershipDocumentUrl: pv.ownership_document_url || '',
+          utilityBillUrl: pv.utility_bill_url || '',
+          status: pv.status || 'pending',
+          created_at: pv.created_at || new Date().toISOString()
+        }));
+      }
+
+      const { data: propData, error: propErr } = await supabase
+        .from('properties')
+        .select('*, profiles(*)')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+
+      if (propErr) {
+        console.error('Supabase getPendingPropertyVerifications error:', propErr);
+        throw propErr;
+      }
+
+      return (propData || []).map(p => ({
+        id: p.id,
+        propertyId: p.id,
+        title: p.title || 'Property Listing',
+        address: p.address || p.area || 'Mirpur, Dhaka',
+        landlordName: p.profiles?.full_name || p.profiles?.name || 'Landlord',
+        landlordEmail: p.profiles?.email || '',
+        ownershipDocumentUrl: p.ownership_document_url || '',
+        utilityBillUrl: p.utility_bill_url || '',
+        status: p.status || 'pending',
+        created_at: p.created_at || new Date().toISOString()
+      }));
+    }
+
+    const localList = getLocal('property_verifications');
+    return localList.filter(p => (p.status || 'pending') === 'pending');
+  },
+
+  async updatePropertyVerification(verificationIdOrPropertyId, status) {
+    if (!verificationIdOrPropertyId) throw new Error('Property ID is required.');
+    const validStatus = (status || '').toLowerCase() === 'approve' || status === 'approved' ? 'approved' : 'rejected';
+
+    if (isConfigured) {
+      const isNumeric = !isNaN(Number(verificationIdOrPropertyId));
+      const targetId = isNumeric ? Number(verificationIdOrPropertyId) : verificationIdOrPropertyId;
+
+      const { error: pvErr } = await supabase
+        .from('property_verifications')
+        .update({ status: validStatus, verified_at: new Date().toISOString() })
+        .or(`id.eq.${targetId},property_id.eq.${targetId}`);
+
+      if (pvErr) console.warn('property_verifications update notice:', pvErr.message);
+
+      const { data, error: propErr } = await supabase
+        .from('properties')
+        .update({ status: validStatus, updated_at: new Date().toISOString() })
+        .eq('id', targetId)
+        .select();
+
+      if (propErr && pvErr) {
+        console.error('Supabase updatePropertyVerification error:', propErr);
+        throw propErr;
+      }
+
+      return { success: true, status: validStatus, data };
+    }
+
+    const localList = getLocal('property_verifications');
+    const updated = localList.map(p => (p.id === verificationIdOrPropertyId || p.propertyId === verificationIdOrPropertyId) ? { ...p, status: validStatus } : p);
+    setLocal('property_verifications', updated);
+    return { success: true, status: validStatus };
+  },
+
   // --- 3. BOOKINGS ---
   async getBookings() {
     if (isConfigured) {
@@ -329,89 +501,68 @@ export const dbService = {
     return updated;
   },
 
-  // --- 5. ROOMMATE PROFILES ---
-  async getRoommates() {
-    if (isConfigured) {
-      try {
-        const { data, error } = await supabase.from('roommate_profiles').select('*');
-        if (!error && data && data.length > 0) return data;
-      } catch (e) {
-        console.warn('Supabase getRoommates error:', e);
-      }
-    }
-    return getLocal('roommates');
-  },
 
-  async saveRoommate(profileData) {
-    const current = getLocal('roommates');
-    const updated = [profileData, ...current.filter(r => r.id !== profileData.id)];
-    setLocal('roommates', updated);
-
-    if (isConfigured) {
-      try {
-        const numericBudget = typeof profileData.budget === 'number' 
-          ? profileData.budget 
-          : parseFloat(String(profileData.budget || '6500').replace(/[^0-9.]/g, '')) || 6500;
-
-        await supabase.from('roommate_profiles').insert([{
-          name: profileData.name || 'Student Roommate',
-          budget: numericBudget,
-          bio: profileData.bio || 'Looking for roommate',
-          gender: profileData.gender || 'Male',
-          cleanliness: profileData.cleanliness || 'Clean'
-        }]);
-      } catch (err) {
-        console.warn('Supabase save roommate profile error:', err);
-      }
-    }
-    return updated;
-  },
-
-  // --- 6. CHATS & MESSAGES ---
-  async getChats() {
-    if (isConfigured) {
-      try {
-        const { data, error } = await supabase.from('chats').select('*');
-        if (!error && data && data.length > 0) return data;
-      } catch (e) {
-        console.warn('Supabase getChats error:', e);
-      }
-    }
-    return getLocal('chats');
-  },
-
-  async saveChat(chatObj) {
-    const current = getLocal('chats');
-    const updated = [chatObj, ...current.filter(c => c.id !== chatObj.id)];
-    setLocal('chats', updated);
-
-    if (isConfigured) {
-      try {
-        await supabase.from('chats').upsert([{
-          id: String(chatObj.id),
-          name: chatObj.name || chatObj.participantName || 'Chat',
-          last_message: chatObj.lastMessage || chatObj.last_message || '',
-          time: chatObj.time || 'Just now',
-          messages: chatObj.messages || []
-        }]);
-      } catch (err) {
-        console.warn('Supabase save chat error:', err);
-      }
-    }
-    return updated;
-  },
 
   // --- 7. REPORTS & COMPLAINTS ---
   async getReports() {
     if (isConfigured) {
-      try {
-        const { data, error } = await supabase.from('reports').select('*').order('created_at', { ascending: false });
-        if (!error && data && data.length > 0) return data;
-      } catch (e) {
-        console.warn('Supabase getReports error:', e);
+      const { data, error } = await supabase
+        .from('reports')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase getReports error:', error);
+        throw error;
       }
+
+      return (data || []).map(r => ({
+        id: r.id,
+        reporter: r.reporter_name || r.reporter_id || 'Student',
+        target: r.reported_name || r.reported_user_id || 'Property',
+        reason: r.reason || r.subject || r.report_type || 'General Inquiry',
+        description: r.description || '',
+        priority: r.priority || 'medium',
+        status: r.status || 'open',
+        resolution_note: r.resolution_note || '',
+        created_at: r.created_at || new Date().toISOString()
+      }));
     }
+
     return getLocal('reports');
+  },
+
+  async updateReportStatus(reportId, statusAction) {
+    if (!reportId) throw new Error('Report ID is required.');
+    const actionStr = String(statusAction || '').trim();
+
+    let dbStatus = 'resolved';
+    if (['open', 'under_investigation', 'resolved', 'dismissed'].includes(actionStr.toLowerCase())) {
+      dbStatus = actionStr.toLowerCase();
+    }
+
+    if (isConfigured) {
+      const { data, error } = await supabase
+        .from('reports')
+        .update({
+          status: dbStatus,
+          resolution_note: actionStr,
+          resolved_at: new Date().toISOString()
+        })
+        .eq('id', reportId)
+        .select();
+
+      if (error) {
+        console.error('Supabase updateReportStatus error:', error);
+        throw error;
+      }
+      return { success: true, status: dbStatus, data };
+    }
+
+    const current = getLocal('reports');
+    const updated = current.map(r => r.id === reportId ? { ...r, status: actionStr } : r);
+    setLocal('reports', updated);
+    return { success: true, status: actionStr };
   },
 
   async addReport(reportData) {
@@ -469,32 +620,53 @@ export const dbService = {
   // --- 9. AUDIT LOGS ---
   async getAuditLogs() {
     if (isConfigured) {
-      try {
-        const { data, error } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false });
-        if (!error && data && data.length > 0) return data;
-      } catch (e) {
-        console.warn('Supabase getAuditLogs error:', e);
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase getAuditLogs error:', error);
+        throw error;
       }
+
+      return (data || []).map(l => ({
+        id: l.id,
+        admin: l.description ? l.description.replace(/^Admin:\s*/, '') : (l.admin_name || 'Admin'),
+        action: l.action || 'System Action',
+        date: l.created_at ? new Date(l.created_at).toISOString().replace('T', ' ').substring(0, 16) : new Date().toISOString().replace('T', ' ').substring(0, 16),
+        ip: l.ip_address || '127.0.0.1'
+      }));
     }
+
     return getLocal('audit_logs') || [];
   },
 
   async saveAuditLog(logObj) {
-    const current = getLocal('audit_logs') || [];
-    const updated = [logObj, ...current];
-    setLocal('audit_logs', updated);
+    if (!logObj || !logObj.action) return null;
+
+    const payload = {
+      action: logObj.action,
+      description: logObj.admin ? `Admin: ${logObj.admin}` : (logObj.description || 'Admin Action'),
+      ip_address: logObj.ip || logObj.ip_address || '127.0.0.1'
+    };
 
     if (isConfigured) {
-      try {
-        await supabase.from('audit_logs').insert([{
-          admin_name: logObj.admin || 'Admin',
-          action: logObj.action || 'System Action',
-          ip_address: logObj.ip || '127.0.0.1'
-        }]);
-      } catch (err) {
-        console.warn('Supabase saveAuditLog error:', err);
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .insert([payload])
+        .select();
+
+      if (error) {
+        console.error('Supabase saveAuditLog error:', error);
+        throw error;
       }
+      return data;
     }
+
+    const current = getLocal('audit_logs') || [];
+    const updated = [{ ...logObj, id: logObj.id || Date.now() }, ...current];
+    setLocal('audit_logs', updated);
     return updated;
   },
 
@@ -1298,7 +1470,7 @@ export const dbService = {
   },
 
   // --- 11. TEMPORARY EMAIL VERIFICATIONS ---
-  async saveTempVerification(email, code, signupData) {
+  async saveTempVerification(email, code, signupData = null) {
     const key = (email || '').toLowerCase().trim();
     const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
     const record = { email: key, code: String(code), signupData, expiresAt };
@@ -1307,18 +1479,6 @@ export const dbService = {
     const updated = [record, ...verifications.filter(v => v.email !== key)];
     setLocal('verifications', updated);
 
-    if (isConfigured) {
-      try {
-        await supabase.from('email_verifications').upsert([{
-          email: key,
-          code: String(code),
-          signup_data: signupData,
-          expires_at: new Date(expiresAt).toISOString()
-        }]);
-      } catch (err) {
-        console.warn('Supabase save email verification error:', err);
-      }
-    }
     return record;
   },
 
@@ -1431,16 +1591,17 @@ export const dbService = {
 
   async getPendingIdVerifications() {
     if (isConfigured) {
-      try {
-        const { data, error } = await supabase
-          .from('id_verifications')
-          .select('*')
-          .eq('verification_status', 'pending')
-          .order('submitted_at', { ascending: false });
-        if (!error && data) return data;
-      } catch (e) {
-        console.warn('Supabase getPendingIdVerifications error:', e);
+      const { data, error } = await supabase
+        .from('id_verifications')
+        .select('*')
+        .eq('verification_status', 'pending')
+        .order('submitted_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase getPendingIdVerifications error:', error);
+        throw error;
       }
+      return data || [];
     }
     const localList = getLocal('id_verifications');
     return localList.filter(v => v.verification_status === 'pending');
@@ -1516,7 +1677,7 @@ export const dbService = {
   async uploadStorageFile(bucketName, filePath, fileObj) {
     if (!isConfigured) return null;
     try {
-      const { data, error } = await supabase.storage.from(bucketName).upload(filePath, fileObj, {
+      const { error } = await supabase.storage.from(bucketName).upload(filePath, fileObj, {
         cacheControl: '3600',
         upsert: true
       });

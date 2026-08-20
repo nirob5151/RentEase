@@ -74,6 +74,7 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
   const [forgotIsBlocked, setForgotIsBlocked] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [forgotVerificationToken, setForgotVerificationToken] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
   const [forgotError, setForgotError] = useState(null);
@@ -285,15 +286,25 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
       intake: intakeNo || '51/8'
     };
 
-    // Step 4: Store temp code in database with 10-minute expiry
-    await dbService.saveTempVerification(inputEmail, generatedCode, signupData);
-
-    // Step 5: Send verification code to user email
-    await emailService.sendVerificationCode({
-      email: inputEmail,
-      code: generatedCode,
-      name: inputName
-    });
+    // Step 4: Dispatch OTP via /api/send-otp serverless endpoint
+    try {
+      const sendRes = await fetch('/api/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: inputEmail,
+          name: inputName,
+          signupData
+        })
+      });
+      const sendData = await sendRes.json().catch(() => ({}));
+      if (!sendRes.ok && sendData.error) {
+        return setError(`Failed to dispatch verification code: ${sendData.error}`);
+      }
+    } catch (err) {
+      // Fallback for static local dev mode
+      await dbService.saveTempVerification(inputEmail, generatedCode, signupData);
+    }
 
     // Step 6: Load verification screen with code input fields
     setOtp(['', '', '', '', '', '']);
@@ -304,7 +315,7 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
   };
 
   // ----------------------------------------------------
-  // Step 7: User Submits 6-Digit Code -> Check Expiry, Match Code & Create User Account Now!
+  // Step 7: User Submits 6-Digit Code -> Check Server-Side OTP & Create Supabase Auth User Account
   // ----------------------------------------------------
   const handleVerifyOtpSubmit = async (e) => {
     e.preventDefault();
@@ -317,43 +328,76 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
 
     const inputEmail = (email || '').trim().toLowerCase();
 
-    // Check code against stored code in database for that email
-    const storedRecord = await dbService.getTempVerification(inputEmail);
+    // 1. Server-side OTP verification via /api/verify-otp endpoint
+    let isCodeValid = false;
+    let serverSignupData = null;
 
-    if (!storedRecord) {
-      return setError('No active verification code found for this email. Please click Resend Code.');
+    try {
+      const verifyRes = await fetch('/api/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: inputEmail, code: enteredCode })
+      });
+      const verifyData = await verifyRes.json().catch(() => ({}));
+
+      if (verifyRes.ok && verifyData.valid) {
+        isCodeValid = true;
+        serverSignupData = verifyData.signupData;
+      } else if (verifyData.message) {
+        return setError(verifyData.message);
+      }
+    } catch {
+      // Fallback verification check in local static dev environment
+      const storedRecord = await dbService.getTempVerification(inputEmail);
+      if (storedRecord && Date.now() <= storedRecord.expiresAt && enteredCode === storedRecord.code) {
+        isCodeValid = true;
+        serverSignupData = storedRecord.signupData;
+      }
     }
 
-    // Check code hasn't expired (10-minute expiry window)
-    if (Date.now() > storedRecord.expiresAt) {
-      return setError('⏰ Verification code has EXPIRED (10-minute limit). Please click Resend Code for a new code.');
+    if (!isCodeValid) {
+      return setError('❌ Invalid or expired verification code. Please check the code or click Resend.');
     }
 
-    // Check if code matches
-    if (enteredCode !== storedRecord.code) {
-      return setError('❌ Invalid verification code. Please check the code and try again.');
+    // 2. Perform authentic Supabase Auth registration
+    const inputRole = role === 'student' ? 'student' : 'landlord';
+    let authUser = null;
+
+    if (isConfigured) {
+      const { data: authData, error: authErr } = await supabase.auth.signUp({
+        email: inputEmail,
+        password: password,
+        options: {
+          data: {
+            name: name || 'User',
+            role: inputRole
+          }
+        }
+      });
+
+      if (authErr) {
+        return setError(`Registration Error: ${authErr.message}`);
+      }
+      authUser = authData?.user;
     }
 
-    // Code is VALID and MATCHES!
-    // Create actual user account in database now!
-    const newUser = storedRecord.signupData || {
-      name: name || 'Student',
+    // 3. Save profile data in Profiles table
+    const newUserPayload = {
+      id: authUser?.id || studentId || ('usr_' + Date.now()),
+      name: name || serverSignupData?.name || 'User',
       email: inputEmail,
-      phone: phone || '+880 1712-345678',
+      phone: phone || serverSignupData?.phone || '',
       role: role === 'student' ? 'Student Account' : 'Landlord Account',
       university: university,
-      id: studentId || '22235103467'
+      avatar: profileImage || ''
     };
 
-    await dbService.saveUser(newUser);
-
-    // Step 8: Delete/invalidate temporary verification code once used
+    await dbService.saveUser(newUserPayload);
     await dbService.deleteTempVerification(inputEmail);
 
-    // Log user in (create session/JWT) & redirect to Student Dashboard
-    setSuccessMsg('🎉 Email verified successfully! Logging in to Student Dashboard...');
+    setSuccessMsg('🎉 Account created & verified successfully! Logging in...');
     setTimeout(() => {
-      onAuthSuccess(newUser);
+      onAuthSuccess(newUserPayload);
     }, 1200);
   };
 
@@ -420,13 +464,21 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
       return setForgotError('Please enter a valid registered email address.');
     }
 
-    const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
-    await dbService.saveTempVerification(targetEmail, generatedCode, { email: targetEmail, isPasswordReset: true });
-    await emailService.sendVerificationCode({
-      email: targetEmail,
-      code: generatedCode,
-      name: 'User'
-    });
+    try {
+      const sendRes = await fetch('/api/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: targetEmail, name: 'User' })
+      });
+      const sendData = await sendRes.json().catch(() => ({}));
+      if (!sendRes.ok && sendData.error) {
+        return setForgotError(`Failed to send verification code: ${sendData.error}`);
+      }
+    } catch (err) {
+      // Fallback for local static mode
+      const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
+      await dbService.saveTempVerification(targetEmail, generatedCode, { email: targetEmail, isPasswordReset: true });
+    }
 
     setForgotStep(2);
     setForgotOtpDigits(['', '', '', '', '', '']);
@@ -441,13 +493,20 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
     const targetEmail = (forgotInput || '').trim().toLowerCase();
     if (!targetEmail) return setForgotError('Email missing.');
 
-    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
-    await dbService.saveTempVerification(targetEmail, newCode, { email: targetEmail, isPasswordReset: true });
-    await emailService.sendVerificationCode({
-      email: targetEmail,
-      code: newCode,
-      name: 'User'
-    });
+    try {
+      const sendRes = await fetch('/api/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: targetEmail, name: 'User' })
+      });
+      const sendData = await sendRes.json().catch(() => ({}));
+      if (!sendRes.ok && sendData.error) {
+        return setForgotError(`Failed to send verification code: ${sendData.error}`);
+      }
+    } catch (err) {
+      const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+      await dbService.saveTempVerification(targetEmail, newCode, { email: targetEmail, isPasswordReset: true });
+    }
 
     setForgotOtpDigits(['', '', '', '', '', '']);
     setForgotResendTimer(60);
@@ -457,7 +516,7 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
     setForgotError(null);
   };
 
-  // Forgot Step 2: Verify OTP
+  // Forgot Step 2: Verify OTP via server endpoint /api/verify-otp
   const handleForgotVerifyOtp = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     setForgotError(null);
@@ -476,8 +535,36 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
     }
 
     const targetEmail = (forgotInput || '').trim().toLowerCase();
-    const storedRecord = await dbService.getTempVerification(targetEmail);
 
+    try {
+      const verifyRes = await fetch('/api/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: targetEmail, code: enteredCode })
+      });
+      const verifyData = await verifyRes.json().catch(() => ({}));
+
+      if (verifyRes.ok && verifyData.valid) {
+        setForgotVerificationToken(verifyData.token || '');
+        setForgotStep(3);
+        setForgotError(null);
+        setNewPassword('');
+        setConfirmNewPassword('');
+        return;
+      } else if (verifyData.message) {
+        const newAttempts = forgotFailedAttempts + 1;
+        setForgotFailedAttempts(newAttempts);
+        if (newAttempts >= 3) {
+          setForgotIsBlocked(true);
+          return setForgotError('⛔ Too many failed attempts (3/3). Verification temporarily blocked for security. Please click Resend OTP.');
+        }
+        return setForgotError(verifyData.message);
+      }
+    } catch {
+      // Fallback verification in offline static mode
+    }
+
+    const storedRecord = await dbService.getTempVerification(targetEmail);
     if (!storedRecord || Date.now() > storedRecord.expiresAt) {
       return setForgotError('⏰ Verification code has EXPIRED or is invalid. Please click Resend OTP.');
     }
@@ -500,8 +587,8 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
     }
   };
 
-  // Forgot Step 3: Create New Password
-  const handleResetPasswordSubmit = (e) => {
+  // Forgot Step 3: Create New Password via /api/reset-password
+  const handleResetPasswordSubmit = async (e) => {
     e.preventDefault();
     setForgotError(null);
 
@@ -512,8 +599,35 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
       return setForgotError('Passwords do not match. Please re-enter.');
     }
 
-    // Password reset successful -> Step 4
-    setForgotStep(4);
+    const targetEmail = (forgotInput || '').trim().toLowerCase();
+
+    try {
+      const resetRes = await fetch('/api/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: targetEmail,
+          newPassword: newPassword,
+          verificationToken: forgotVerificationToken
+        })
+      });
+      const resetData = await resetRes.json().catch(() => ({}));
+
+      if (resetRes.ok && resetData.success) {
+        setForgotStep(4);
+        setForgotError(null);
+        return;
+      } else {
+        return setForgotError(resetData.error || 'Failed to reset password. Please try again.');
+      }
+    } catch (err) {
+      if (!isConfigured) {
+        setForgotStep(4);
+        setForgotError(null);
+        return;
+      }
+      return setForgotError('Network error resetting password. Please try again.');
+    }
   };
 
   // Forgot Step 4: Back to Login
@@ -526,6 +640,7 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
     setTimeout(() => setSuccessMsg(null), 5000);
   };
 
+  // Authentic Supabase Auth Sign In (No hardcoded bypasses)
   const handleSignInSubmit = async (e) => {
     e.preventDefault();
     setError(null);
@@ -534,49 +649,60 @@ function Auth({ onAuthSuccess, initialMode = 'signup', onBackToHome }) {
     if (!inputVal) return setError('Please enter your email address.');
     if (!password) return setError('Please enter your password.');
 
-    // 1. Query user profile by email from database
+    if (isConfigured) {
+      const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
+        email: inputVal,
+        password: password
+      });
+
+      if (authErr) {
+        return setError(`Invalid email or password.`);
+      }
+
+      const dbUser = await dbService.getUserByEmail(inputVal);
+      const rawRole = (dbUser?.rawRole || authData?.user?.user_metadata?.role || 'student').toLowerCase();
+      const roleTitle = rawRole.includes('landlord') ? 'Landlord Account' : rawRole.includes('admin') ? 'Admin Account' : 'Student Account';
+
+      const loggedInUser = {
+        id: authData?.user?.id || dbUser?.id,
+        name: dbUser?.name || authData?.user?.user_metadata?.name || 'User',
+        email: authData?.user?.email || inputVal,
+        phone: dbUser?.phone || '',
+        role: roleTitle,
+        avatar: dbUser?.avatar || ''
+      };
+
+      onAuthSuccess(loggedInUser);
+      return;
+    }
+
+    // Fallback for offline local dev mode
     const dbUser = await dbService.getUserByEmail(inputVal);
-
     if (!dbUser) {
-      return setError('Invalid email or password');
+      return setError('Invalid email or password.');
     }
-
-    // 2. Verify password securely using database / hashed auth engine
     const isValidPassword = await dbService.verifyUserPassword(inputVal, password, dbUser);
-
     if (!isValidPassword) {
-      return setError('Invalid email or password');
+      return setError('Invalid email or password.');
     }
 
-    // 3. Resolve role and complete sign-in
-    const rawRole = (dbUser.rawRole || dbUser.role || 'student').toLowerCase();
-    const isSuperAdmin = inputVal === 'renteasy.web@gmail.com' || (dbUser.name && dbUser.name.includes('Super Admin')) || rawRole.includes('super_admin');
-    const roleTitle = rawRole.includes('landlord') 
-      ? 'Landlord Account' 
-      : (rawRole.includes('admin') || isSuperAdmin)
-        ? (isSuperAdmin ? 'Super Admin (Root)' : 'Admin Account')
-        : 'Student Account';
-
-    const loggedInUser = {
-      ...dbUser,
-      role: roleTitle
-    };
-
-    onAuthSuccess(loggedInUser);
+    onAuthSuccess(dbUser);
   };
 
-  const handleGoogleSignIn = () => {
-    const googleUser = {
-      name: 'Maruf Billah Anas (Google)',
-      email: '22235103467@cse.bubt.edu.bd',
-      phone: '+880 1712-345678',
-      role: 'Student Account',
-      university: 'Bangladesh University of Business and Technology (BUBT)',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80',
-      id: '22235103496',
-      intake: '51/8'
-    };
-    onAuthSuccess(googleUser);
+  // Wire up authentic Supabase Google OAuth
+  const handleGoogleSignIn = async () => {
+    setError(null);
+    if (isConfigured) {
+      const { error: oauthErr } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.origin }
+      });
+      if (oauthErr) {
+        setError(`Google Sign In Error: ${oauthErr.message}`);
+      }
+    } else {
+      setError('Supabase Auth is not configured. Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your environment variables.');
+    }
   };
 
   const formatTimer = (seconds) => {
